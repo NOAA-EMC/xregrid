@@ -15,6 +15,7 @@ dependencies = [
     "dask",
     "netCDF4",
     "esmpy",
+    "cf-xarray",
 ]
 
 [project.optional-dependencies]

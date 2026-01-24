@@ -4,6 +4,7 @@ import datetime
 import os
 from typing import TYPE_CHECKING, Optional, Tuple, Union
 
+import cf_xarray  # noqa: F401
 import esmpy
 import numpy as np
 import xarray as xr
@@ -119,6 +120,9 @@ class ESMPyRegridder:
         """
         Detects grid type and extracts coordinates and shape.
 
+        Uses cf-xarray for automatic coordinate detection if standard
+        names 'lat' and 'lon' are not present.
+
         Parameters
         ----------
         ds : xr.Dataset
@@ -137,10 +141,21 @@ class ESMPyRegridder:
         is_unstructured : bool
             Whether the grid is unstructured.
         """
-        lat = ds["lat"]
-        lon = ds["lon"]
+        try:
+            lat = ds.cf["latitude"]
+            lon = ds.cf["longitude"]
+        except (KeyError, AttributeError):
+            if "lat" in ds and "lon" in ds:
+                lat = ds["lat"]
+                lon = ds["lon"]
+            else:
+                raise KeyError(
+                    "Could not find latitude/longitude coordinates. "
+                    "Ensure they are named 'lat'/'lon' or have CF attributes."
+                )
 
         # ESMF requires numpy arrays for grid definition
+        # We use .values here because ESMF is a C++ library that needs concrete arrays
         if lat.ndim == 2:
             # Curvilinear
             return lon.values, lat.values, lat.shape, lat.dims, False
@@ -159,7 +174,7 @@ class ESMPyRegridder:
                     False,
                 )
         else:
-            raise ValueError("lat/lon must be 1D or 2D")
+            raise ValueError("Latitude and longitude must be 1D or 2D.")
 
     def _create_esmf_object(
         self, ds: xr.Dataset, is_source: bool = True
@@ -213,7 +228,32 @@ class ESMPyRegridder:
             periodic_dim = 0 if self.periodic else None
             pole_dim = 1 if self.periodic else None
 
-            has_bounds = "lat_b" in ds and "lon_b" in ds
+            # Attempt to find bounds using cf-xarray or standard names
+            lat_b = None
+            lon_b = None
+            try:
+                lat_b_da = ds.cf.get_bounds("latitude")
+                lon_b_da = ds.cf.get_bounds("longitude")
+
+                def _bounds_to_vertices(b: xr.DataArray) -> np.ndarray:
+                    """Convert (N, 2) bounds to (N+1,) vertices."""
+                    if b.ndim == 2 and b.shape[-1] == 2:
+                        # Take the first column and the last element of the second column
+                        # This assumes the bounds are contiguous
+                        return np.concatenate([b[:, 0].values, b[-1:, 1].values])
+                    return b.values
+
+                lat_b = _bounds_to_vertices(lat_b_da)
+                lon_b = _bounds_to_vertices(lon_b_da)
+            except (KeyError, AttributeError):
+                pass
+
+            if lat_b is None or lon_b is None:
+                if "lat_b" in ds and "lon_b" in ds:
+                    lat_b = ds["lat_b"]
+                    lon_b = ds["lon_b"]
+
+            has_bounds = lat_b is not None and lon_b is not None
             staggerlocs = [esmpy.StaggerLoc.CENTER]
             if has_bounds:
                 staggerlocs.append(esmpy.StaggerLoc.CORNER)
@@ -233,12 +273,14 @@ class ESMPyRegridder:
             grid_lat[...] = lat_f.astype(np.float64)
 
             if has_bounds:
-                lon_b = ds["lon_b"]
-                lat_b = ds["lat_b"]
-                if lon_b.ndim == 1 and lat_b.ndim == 1:
-                    lon_b_vals, lat_b_vals = np.meshgrid(lon_b.values, lat_b.values)
+                # lat_b and lon_b are already set from above (as numpy arrays or DataArrays)
+                lat_b_val = lat_b.values if hasattr(lat_b, "values") else lat_b
+                lon_b_val = lon_b.values if hasattr(lon_b, "values") else lon_b
+
+                if lon_b_val.ndim == 1 and lat_b_val.ndim == 1:
+                    lon_b_vals, lat_b_vals = np.meshgrid(lon_b_val, lat_b_val)
                 else:
-                    lon_b_vals, lat_b_vals = lon_b.values, lat_b.values
+                    lon_b_vals, lat_b_vals = lon_b_val, lat_b_val
 
                 grid_lon_b = grid.get_coords(0, staggerloc=esmpy.StaggerLoc.CORNER)
                 grid_lat_b = grid.get_coords(1, staggerloc=esmpy.StaggerLoc.CORNER)
