@@ -32,7 +32,7 @@ conda create -n xregrid python>=3.9
 conda activate xregrid
 
 # Install dependencies
-conda install -c conda-forge esmpy xesmf xarray numpy scipy dask netcdf4 pandas pytest
+conda install -c conda-forge esmpy cf-xarray xesmf xarray numpy scipy dask netcdf4 pandas pytest
 
 # Install xregrid from source
 pip install -e .
@@ -124,6 +124,7 @@ XRegrid requires the following packages:
 
 - **Python** ≥ 3.9
 - **xarray** - For data structure support
+- **cf-xarray** - Automatic CF-compliant coordinate detection
 - **numpy** - Numerical computations
 - **scipy** - Sparse matrix operations
 - **esmpy** - Earth System Modeling Framework Python interface

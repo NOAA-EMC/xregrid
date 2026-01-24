@@ -13,7 +13,9 @@ XRegrid is a high-performance regridding library that builds on top of ESMF (Ear
 - **Dask Integration**: Seamless parallel processing with Dask arrays
 - **Memory Efficient**: Optimized sparse matrix operations using scipy
 - **xarray Compatible**: Native support for xarray datasets and data arrays
+- **Automatic coordinate detection**: Support for `cf-xarray` for easy coordinate and boundary identification
 - **Weight Reuse**: Save and load regridding weights to/from NetCDF files
+- **Grid Utilities**: Built-in functions for quick global and regional grid generation
 
 ## Quick Example
 

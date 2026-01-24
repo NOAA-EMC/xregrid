@@ -20,6 +20,7 @@ nav:
     - Performance Tips: examples/performance-optimization.md
   - API Reference:
     - ESMPyRegridder: api/regridder.md
+    - Utilities: api/utils.md
 
 theme:
   name: material

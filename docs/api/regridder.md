@@ -13,6 +13,7 @@ The `ESMPyRegridder` is the main class for performing regridding operations in X
 - **Weight reuse**: Save and load regridding weights for repeated operations
 - **Dask integration**: Seamless support for chunked arrays and parallel processing
 - **Global grid support**: Proper handling of periodic boundary conditions
+- **Automatic coordinate detection**: Support for `cf-xarray` for easy coordinate and boundary identification
 
 ### Usage Examples
 
@@ -67,11 +68,11 @@ regridder2 = ESMPyRegridder(
 
 #### Conservative Regridding
 
-Conservative regridding requires cell boundary information (corners). These must be provided in the datasets as `lat_b` and `lon_b`.
+Conservative regridding requires cell boundary information (corners). These can be automatically detected if they follow CF conventions (via `cf-xarray`) or provided manually as `lat_b` and `lon_b`.
 
 ```python
 # For flux quantities (precipitation, radiation, etc.)
-# Source and target grids must contain 'lat_b' and 'lon_b'
+# XRegrid will automatically find bounds if they have CF attributes
 regridder = ESMPyRegridder(
     source_grid, target_grid,
     method='conservative',
