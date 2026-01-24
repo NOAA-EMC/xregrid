@@ -177,10 +177,19 @@ def test_plot_static_custom_ax():
 def test_regridder_repr():
     source_ds = create_sample_dataset(nlat=10, nlon=20)
     target_ds = create_sample_dataset(nlat=15, nlon=25)
-    regridder = ESMPyRegridder(source_ds, target_ds, method="bilinear", periodic=True)
+    regridder = ESMPyRegridder(source_ds, target_ds, method="bilinear", periodic=False)
     rep = repr(regridder)
     assert "ESMPyRegridder" in rep
     assert "method=bilinear" in rep
-    assert "periodic=True" in rep
+    assert "periodic=False" in rep
     assert "(10, 20)" in rep
     assert "(15, 25)" in rep
+
+
+def test_weights_format():
+    from scipy.sparse import csr_matrix
+
+    source_ds = create_sample_dataset(nlat=10, nlon=20)
+    target_ds = create_sample_dataset(nlat=15, nlon=25)
+    regridder = ESMPyRegridder(source_ds, target_ds)
+    assert isinstance(regridder._weights_matrix, csr_matrix)
