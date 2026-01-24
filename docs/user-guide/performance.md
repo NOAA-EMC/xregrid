@@ -10,7 +10,7 @@ XRegrid provides significant performance improvements over existing solutions:
 |------------|-------------|---------|-------|--------|
 | 1.0° Global | 64,800 | 0.0027s | 0.044s | ~16x |
 | 0.5° Global | 259,200 | 0.0073s | 0.178s | ~24x |
-| 0.25° Global | 1,036,800 | 0.025s | 0.69s | ~27x |
+| 0.25° Global | 1,036,800 | 0.025s | 0.75s | ~30x |
 
 ## Key Performance Features
 

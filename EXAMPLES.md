@@ -76,13 +76,13 @@ The following tables compare the **weight application phase** (regridding the ac
 | :--- | :--- | :--- | :--- | :--- |
 | **1.0°** | 64,800 | 0.0027s | 0.044s | ~16x |
 | **0.5°** | 259,200 | 0.0073s | 0.178s | ~24x |
-| **0.25°** | 1,036,800 | 0.025s | 0.69s | ~27x |
+| **0.25°** | 1,036,800 | 0.025s | 0.75s | ~30x |
 
 ### Table 2: Performance by Resolution (20 Time Steps)
 | Resolution | Total Points | ESMPyRegridder (s) | xESMF (s) | Speedup |
 | :--- | :--- | :--- | :--- | :--- |
 | **1.0°** | 64,800 | 0.055s | 0.88s | ~16x |
-| **0.25°** | 1,036,800 | 0.50s | 13.7s | ~27x |
+| **0.25°** | 1,036,800 | 0.50s | 15.0s | ~30x |
 
 ### Table 3: Dask & Parallel Performance (Chunked Data)
 | Resolution | Time Steps | Chunks | ESMPyRegridder (s) | xESMF (s) | Speedup |
