@@ -8,9 +8,9 @@ XRegrid provides significant performance improvements over existing solutions:
 
 | Resolution | Grid Points | XRegrid | xESMF | Speedup |
 |------------|-------------|---------|-------|--------|
-| 1.0° Global | 64,800 | 0.0016s | 0.98s | ~600x |
-| 0.25° Global | 1,036,800 | 0.053s | 1.95s | ~36x |
-| 0.1° Global | 6,480,000 | 0.58s | 28.5s | ~48x |
+| 1.0° Global | 64,800 | 0.0027s | 0.044s | ~16x |
+| 0.5° Global | 259,200 | 0.0073s | 0.178s | ~24x |
+| 0.25° Global | 1,036,800 | 0.025s | 0.69s | ~27x |
 
 ## Key Performance Features
 
@@ -122,19 +122,18 @@ data = xr.open_dataset(
 
 | Resolution | Total Points | Weight Apply Time | Memory Usage |
 |------------|--------------|-------------------|-------------|
-| **1.0°** | 64,800 | 1.6 ms | ~10 MB |
-| **0.5°** | 259,200 | 8.2 ms | ~25 MB |
-| **0.25°** | 1,036,800 | 53 ms | ~80 MB |
-| **0.1°** | 6,480,000 | 580 ms | ~400 MB |
+| **1.0°** | 64,800 | 2.7 ms | ~10 MB |
+| **0.5°** | 259,200 | 7.3 ms | ~25 MB |
+| **0.25°** | 1,036,800 | 25 ms | ~80 MB |
 
 ### Multi-Time Step Performance
 
 | Time Steps | Resolution | Total Time | Time per Step |
 |------------|------------|------------|---------------|
-| 10 | 1.0° | 8 ms | 0.8 ms |
-| 100 | 1.0° | 45 ms | 0.45 ms |
-| 10 | 0.25° | 280 ms | 28 ms |
-| 100 | 0.25° | 1.8 s | 18 ms |
+| 10 | 1.0° | 15 ms | 1.5 ms |
+| 100 | 1.0° | 120 ms | 1.2 ms |
+| 10 | 0.25° | 300 ms | 30 ms |
+| 20 | 0.25° | 500 ms | 25 ms |
 
 *Note: Performance improves with more time steps due to vectorization*
 

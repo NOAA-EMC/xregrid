@@ -48,10 +48,11 @@ ds_out = xr.Dataset({
     'lon': (['lon'], np.linspace(0, 360, 360))
 })
 
-regridder = ESMPyRegridder(ds_in, ds_out, method='bilinear')
+regridder = ESMPyRegridder(ds_in, ds_out, method='nearest_s2d')
 
 # The regridder auto-detects that 'lat' and 'lon' share a dimension,
-# identifying it as an unstructured grid.
+# identifying it as an unstructured grid. Currently only nearest-neighbor
+# methods are supported for unstructured grids.
 ```
 
 ## 4. Ultra-High Resolution (3km Global)
@@ -60,9 +61,9 @@ High-resolution climate simulations (e.g., DYAMOND project) reach 3km global res
 
 | Resolution | Grid Points | Weights (approx) | Apply Time (2D) |
 | :--- | :--- | :--- | :--- |
-| 1° (Global) | 6.5e4 | 2.6e5 | < 0.01s |
-| 0.25° (Global) | 1e6 | 4e6 | ~0.05s |
-| 3km (Global) | 8.8e7 | 3.5e8 | ~5.0s |
+| 1° (Global) | 6.5e4 | 2.6e5 | ~0.003s |
+| 0.25° (Global) | 1e6 | 4e6 | ~0.025s |
+| 3km (Global) | 8.8e7 | 3.5e8 | ~2.5s |
 
 ---
 
@@ -73,16 +74,15 @@ The following tables compare the **weight application phase** (regridding the ac
 ### Table 1: Performance by Resolution (Single Time Step)
 | Resolution | Total Points | ESMPyRegridder (s) | xESMF (s) | Speedup |
 | :--- | :--- | :--- | :--- | :--- |
-| **1.0°** | 64,800 | 0.0016s | 0.98s | ~600x |
-| **0.25°** | 1,036,800 | 0.053s | 1.95s | ~36x |
-| **0.1°** | 6,480,000 | 0.58s | 28.5s | ~48x |
+| **1.0°** | 64,800 | 0.0027s | 0.044s | ~16x |
+| **0.5°** | 259,200 | 0.0073s | 0.178s | ~24x |
+| **0.25°** | 1,036,800 | 0.025s | 0.69s | ~27x |
 
-### Table 2: Performance by Resolution (10 Time Steps)
+### Table 2: Performance by Resolution (20 Time Steps)
 | Resolution | Total Points | ESMPyRegridder (s) | xESMF (s) | Speedup |
 | :--- | :--- | :--- | :--- | :--- |
-| **1.0°** | 64,800 | 0.008s | 0.10s | ~12x |
-| **0.25°** | 1,036,800 | 0.28s | 2.12s | ~7x |
-| **0.1°** | 6,480,000 | 1.80s | 24.4s | ~13x |
+| **1.0°** | 64,800 | 0.055s | 0.88s | ~16x |
+| **0.25°** | 1,036,800 | 0.50s | 13.7s | ~27x |
 
 ### Table 3: Dask & Parallel Performance (Chunked Data)
 | Resolution | Time Steps | Chunks | ESMPyRegridder (s) | xESMF (s) | Speedup |

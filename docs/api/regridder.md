@@ -67,8 +67,11 @@ regridder2 = ESMPyRegridder(
 
 #### Conservative Regridding
 
+Conservative regridding requires cell boundary information (corners). These must be provided in the datasets as `lat_b` and `lon_b`.
+
 ```python
 # For flux quantities (precipitation, radiation, etc.)
+# Source and target grids must contain 'lat_b' and 'lon_b'
 regridder = ESMPyRegridder(
     source_grid, target_grid,
     method='conservative',
@@ -109,6 +112,8 @@ grid = xr.Dataset({
 ```
 
 #### Unstructured Grids
+Currently, unstructured grids (MPAS, ICON) only support nearest-neighbor regridding methods (`nearest_s2d` or `nearest_d2s`).
+
 ```python
 # 1D arrays with same dimension
 grid = xr.Dataset({

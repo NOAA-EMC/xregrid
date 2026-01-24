@@ -191,6 +191,13 @@ class ESMPyRegridder:
             self._is_unstructured_tgt = is_unstructured
 
         if is_unstructured:
+            if self.method not in ["nearest_s2d", "nearest_d2s"]:
+                raise NotImplementedError(
+                    f"Method '{self.method}' is not yet supported for unstructured grids. "
+                    "Currently only 'nearest_s2d' and 'nearest_d2s' are supported for "
+                    "unstructured grids via LocStream."
+                )
+
             locstream = esmpy.LocStream(shape[0], coord_sys=esmpy.CoordSys.SPH_DEG)
             locstream["ESMF:Lon"] = lon.astype(np.float64)
             locstream["ESMF:Lat"] = lat.astype(np.float64)
@@ -206,9 +213,14 @@ class ESMPyRegridder:
             periodic_dim = 0 if self.periodic else None
             pole_dim = 1 if self.periodic else None
 
+            has_bounds = "lat_b" in ds and "lon_b" in ds
+            staggerlocs = [esmpy.StaggerLoc.CENTER]
+            if has_bounds:
+                staggerlocs.append(esmpy.StaggerLoc.CORNER)
+
             grid = esmpy.Grid(
                 np.array(shape_f),
-                staggerloc=esmpy.StaggerLoc.CENTER,
+                staggerloc=staggerlocs,
                 coord_sys=esmpy.CoordSys.SPH_DEG,
                 num_peri_dims=num_peri_dims,
                 periodic_dim=periodic_dim,
@@ -219,6 +231,28 @@ class ESMPyRegridder:
             grid_lat = grid.get_coords(1, staggerloc=esmpy.StaggerLoc.CENTER)
             grid_lon[...] = lon_f.astype(np.float64)
             grid_lat[...] = lat_f.astype(np.float64)
+
+            if has_bounds:
+                lon_b = ds["lon_b"]
+                lat_b = ds["lat_b"]
+                if lon_b.ndim == 1 and lat_b.ndim == 1:
+                    lon_b_vals, lat_b_vals = np.meshgrid(lon_b.values, lat_b.values)
+                else:
+                    lon_b_vals, lat_b_vals = lon_b.values, lat_b.values
+
+                grid_lon_b = grid.get_coords(0, staggerloc=esmpy.StaggerLoc.CORNER)
+                grid_lat_b = grid.get_coords(1, staggerloc=esmpy.StaggerLoc.CORNER)
+
+                lon_b_vals_f = lon_b_vals.T
+                lat_b_vals_f = lat_b_vals.T
+
+                if self.periodic:
+                    # Remove the redundant corner in the periodic dimension
+                    lon_b_vals_f = lon_b_vals_f[:-1, :]
+                    lat_b_vals_f = lat_b_vals_f[:-1, :]
+
+                grid_lon_b[...] = lon_b_vals_f.astype(np.float64)
+                grid_lat_b[...] = lat_b_vals_f.astype(np.float64)
 
             if is_source and self.mask_var and self.mask_var in ds:
                 grid.add_item(esmpy.GridItem.MASK, staggerloc=esmpy.StaggerLoc.CENTER)

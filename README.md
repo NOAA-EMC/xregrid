@@ -10,7 +10,7 @@ XRegrid provides high-performance regridding for earth science applications, off
 
 ## 🚀 Key Features
 
-- **Blazing Fast Performance**: Up to 600x faster than xESMF for typical use cases
+- **Blazing Fast Performance**: Up to 30x faster than xESMF for single time-step regridding
 - **Universal Grid Support**: Rectilinear, curvilinear, and unstructured grids (MPAS, ICON)
 - **xarray Integration**: Native support for xarray datasets and data arrays
 - **Memory Efficient**: Optimized sparse matrix operations using scipy
@@ -22,11 +22,11 @@ XRegrid provides high-performance regridding for earth science applications, off
 
 | Resolution | Grid Points | XRegrid | xESMF | **Speedup** |
 |------------|-------------|---------|-------|-------------|
-| 1.0° Global | 64,800 | 0.0016s | 0.98s | **~600x** |
-| 0.25° Global | 1,036,800 | 0.053s | 1.95s | **~36x** |
-| 0.1° Global | 6,480,000 | 0.58s | 28.5s | **~48x** |
+| 1.0° Global | 64,800 | 0.0027s | 0.044s | **~16x** |
+| 0.5° Global | 259,200 | 0.0073s | 0.178s | **~24x** |
+| 0.25° Global | 1,036,800 | 0.025s | 0.69s | **~27x** |
 
-*Performance measured for single time step regridding on typical hardware.*
+*Performance measured for single time step regridding on modern hardware (Intel Xeon, xESMF v0.9.2).*
 
 ## 🛠 Installation
 
@@ -125,6 +125,7 @@ grid = xr.Dataset({
 ```
 
 ### Unstructured Grids (MPAS, ICON)
+*Note: Currently only nearest-neighbor methods are supported for unstructured grids.*
 ```python
 # 1D arrays with same dimension - next-gen climate models
 grid = xr.Dataset({

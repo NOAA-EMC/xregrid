@@ -8,8 +8,8 @@ XRegrid is a high-performance regridding library that builds on top of ESMF (Ear
 
 ## Key Features
 
-- **High Performance**: Up to 600x faster than xESMF for certain grid configurations
-- **Full Grid Support**: Rectilinear, curvilinear, and unstructured grids (MPAS, ICON)
+- **High Performance**: Up to 30x faster than xESMF for single time-step regridding
+- **Correct ESMF Integration**: Native support for rectilinear and curvilinear grids
 - **Dask Integration**: Seamless parallel processing with Dask arrays
 - **Memory Efficient**: Optimized sparse matrix operations using scipy
 - **xarray Compatible**: Native support for xarray datasets and data arrays
@@ -54,9 +54,9 @@ temperature_regridded = regridder(temperature)
 
 | Resolution | Grid Points | ESMPyRegridder | xESMF | Speedup |
 |------------|-------------|----------------|--------|---------|
-| 1.0° Global | 64,800 | 0.0016s | 0.98s | ~600x |
-| 0.25° Global | 1,036,800 | 0.053s | 1.95s | ~36x |
-| 0.1° Global | 6,480,000 | 0.58s | 28.5s | ~48x |
+| 1.0° Global | 64,800 | 0.0027s | 0.044s | ~16x |
+| 0.5° Global | 259,200 | 0.0073s | 0.178s | ~24x |
+| 0.25° Global | 1,036,800 | 0.025s | 0.69s | ~27x |
 
 ## Installation
 
