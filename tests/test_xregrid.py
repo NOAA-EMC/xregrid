@@ -133,3 +133,54 @@ def test_viz_static_call():
     # This should work without error even if it just calls da.plot
     plot_static(source_ds["temperature"])
     plt.close("all")
+
+
+def test_dask_numpy_identity():
+    source_ds = create_sample_dataset(nlat=10, nlon=20)
+    target_ds = create_sample_dataset(nlat=15, nlon=25)
+    regridder = ESMPyRegridder(source_ds, target_ds)
+
+    # Eager
+    da_eager = source_ds["temperature"]
+    res_eager = regridder(da_eager)
+
+    # Lazy
+    da_lazy = da_eager.chunk({"lat": 5, "lon": 10})
+    res_lazy = regridder(da_lazy).compute()
+
+    xr.testing.assert_allclose(res_eager, res_lazy)
+
+
+def test_attribute_preservation():
+    source_ds = create_sample_dataset()
+    source_ds.temperature.attrs["units"] = "K"
+    target_ds = create_sample_dataset(nlat=10, nlon=20)
+    regridder = ESMPyRegridder(source_ds, target_ds)
+    out = regridder(source_ds.temperature)
+    assert out.attrs["units"] == "K"
+
+
+def test_plot_static_custom_ax():
+    try:
+        import matplotlib.pyplot as plt
+        import cartopy.crs as ccrs
+    except ImportError:
+        pytest.skip("matplotlib or cartopy not installed")
+    from xregrid import plot_static
+
+    da = create_sample_dataset()["temperature"]
+    fig, ax = plt.subplots(subplot_kw={"projection": ccrs.Robinson()})
+    plot_static(da, ax=ax)
+    plt.close(fig)
+
+
+def test_regridder_repr():
+    source_ds = create_sample_dataset(nlat=10, nlon=20)
+    target_ds = create_sample_dataset(nlat=15, nlon=25)
+    regridder = ESMPyRegridder(source_ds, target_ds, method="bilinear", periodic=True)
+    rep = repr(regridder)
+    assert "ESMPyRegridder" in rep
+    assert "method=bilinear" in rep
+    assert "periodic=True" in rep
+    assert "(10, 20)" in rep
+    assert "(15, 25)" in rep

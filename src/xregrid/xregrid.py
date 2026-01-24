@@ -302,7 +302,9 @@ class ESMPyRegridder:
         n_src = int(np.prod(self._shape_source))
         n_dst = int(np.prod(self._shape_target))
 
-        self._weights_matrix = coo_matrix((data, (rows, cols)), shape=(n_dst, n_src))
+        self._weights_matrix = coo_matrix(
+            (data, (rows, cols)), shape=(n_dst, n_src)
+        ).tocsr()
 
         if self.skipna:
             self._total_weights = np.ones((1, n_src)) @ self._weights_matrix.T
@@ -347,10 +349,28 @@ class ESMPyRegridder:
         self._is_unstructured_src = bool(ds_weights.attrs["is_unstructured_src"])
         self._is_unstructured_tgt = bool(ds_weights.attrs["is_unstructured_tgt"])
         self.periodic = bool(ds_weights.attrs.get("periodic", False))
-        self._weights_matrix = coo_matrix((data, (rows, cols)), shape=(n_dst, n_src))
+        self._weights_matrix = coo_matrix(
+            (data, (rows, cols)), shape=(n_dst, n_src)
+        ).tocsr()
 
         if self.skipna:
             self._total_weights = np.ones((1, n_src)) @ self._weights_matrix.T
+
+    def __repr__(self) -> str:
+        """
+        String representation of the ESMPyRegridder.
+
+        Returns
+        -------
+        str
+            Summary of the regridder configuration.
+        """
+        return (
+            f"ESMPyRegridder(method={self.method}, "
+            f"src_shape={self._shape_source}, "
+            f"dst_shape={self._shape_target}, "
+            f"periodic={self.periodic})"
+        )
 
     def __call__(self, da_in: xr.DataArray) -> xr.DataArray:
         """
@@ -426,6 +446,9 @@ class ESMPyRegridder:
         out = out.rename(
             {temp: orig for temp, orig in zip(temp_output_core_dims, self._dims_target)}
         )
+
+        # Preserve attributes
+        out.attrs.update(da_in.attrs)
 
         # Assign coordinates from target grid
         out = out.assign_coords(

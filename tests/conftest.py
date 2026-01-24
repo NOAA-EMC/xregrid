@@ -1,0 +1,42 @@
+import sys
+from unittest.mock import MagicMock
+import numpy as np
+
+try:
+    import esmpy  # noqa: F401
+except ImportError:
+    mock_esmpy = MagicMock()
+    mock_esmpy.CoordSys.SPH_DEG = 1
+    mock_esmpy.StaggerLoc.CENTER = 0
+    mock_esmpy.StaggerLoc.CORNER = 1
+    mock_esmpy.GridItem.MASK = 1
+    mock_esmpy.RegridMethod.BILINEAR = 0
+    mock_esmpy.RegridMethod.CONSERVE = 1
+    mock_esmpy.RegridMethod.NEAREST_STOD = 2
+    mock_esmpy.RegridMethod.NEAREST_DTOS = 3
+    mock_esmpy.RegridMethod.PATCH = 4
+    mock_esmpy.UnmappedAction.IGNORE = 1
+
+    # Mock Manager
+    mock_esmpy.Manager.return_value = MagicMock()
+
+    # Mock Grid
+    mock_grid = MagicMock()
+    mock_esmpy.Grid.return_value = mock_grid
+
+    # Mock Field
+    mock_esmpy.Field.return_value = MagicMock()
+
+    # Mock Regrid
+    mock_regrid = MagicMock()
+    mock_regrid.get_factors.return_value = (np.array([0]), np.array([0]))
+    # Mock weights for a small 10x20 -> 15x25 regrid
+    # n_src = 200, n_dst = 375
+    mock_regrid.get_weights_dict.return_value = {
+        "row_dst": np.array([1]),
+        "col_src": np.array([1]),
+        "weights": np.array([1.0]),
+    }
+    mock_esmpy.Regrid.return_value = mock_regrid
+
+    sys.modules["esmpy"] = mock_esmpy

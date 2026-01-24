@@ -68,8 +68,10 @@ def plot_static(
     if transform is None:
         transform = ccrs.PlateCarree()
 
-    plt.gcf()
-    ax = plt.subplot(1, 1, 1, projection=projection)
+    if "ax" in kwargs:
+        ax = kwargs.pop("ax")
+    else:
+        ax = plt.axes(projection=projection)
 
     im = da.plot(ax=ax, transform=transform, **kwargs)
     ax.coastlines()
