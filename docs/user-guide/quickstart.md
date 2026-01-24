@@ -264,7 +264,8 @@ for file in files:
 - Check for invalid coordinates (NaN, inf)
 - Try a different regridding method
 
-**Slow performance**
+**Slow performance or Memory errors**
 - Use `periodic=True` for global grids
-- Enable weight reuse for repeated operations
-- Consider chunking large datasets with Dask
+- Enable weight reuse for repeated operations (`reuse_weights=True`)
+- Consider chunking large datasets with Dask to manage memory
+- Process time series together for better vectorization
