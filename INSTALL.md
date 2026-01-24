@@ -2,16 +2,16 @@
 
 There are two primary ways to set up the environment for `xregrid`.
 
-## 1. Using Conda (Recommended)
+## 1. Using Mamba (Recommended)
 
-The easiest way to install all dependencies, including `esmpy` and `xesmf`, is using `conda` or `mamba` with the `conda-forge` channel.
+The easiest way to install all dependencies, including `esmpy` and `xesmf`, is using `mamba` or `micromamba` with the `conda-forge` channel.
 
 ```bash
 # Create the environment from the provided yaml file
-conda env create -f environment.yml
+mamba env create -f environment.yml
 
 # Activate the environment
-conda activate xregrid-env
+mamba activate xregrid-env
 ```
 
 ## 2. Installing ESMPy from Source

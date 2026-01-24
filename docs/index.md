@@ -55,11 +55,11 @@ temperature_regridded = regridder(temperature)
 
 ## Installation
 
-Install via conda (recommended):
+Install via mamba (recommended):
 
 ```bash
-conda env create -f environment.yml
-conda activate xregrid
+mamba env create -f environment.yml
+mamba activate xregrid
 ```
 
 Or install from source:

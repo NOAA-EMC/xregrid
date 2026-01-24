@@ -1,10 +1,10 @@
 # Installation Guide
 
-There are several ways to install XRegrid and its dependencies. We recommend using conda for the easiest setup.
+There are several ways to install XRegrid and its dependencies. We recommend using `mamba` or `micromamba` for the fastest and easiest setup.
 
 ## Quick Install (Recommended)
 
-The easiest way to install all dependencies, including `esmpy` and `xesmf`, is using `conda` or `mamba` with the `conda-forge` channel.
+The easiest way to install all dependencies, including `esmpy` and `xesmf`, is using `mamba` with the `conda-forge` channel.
 
 ### 1. Using the Environment File
 
@@ -14,25 +14,25 @@ git clone https://github.com/xregrid/xregrid.git
 cd xregrid
 
 # Create the environment from the provided yaml file
-conda env create -f environment.yml
+mamba env create -f environment.yml
 
 # Activate the environment
-conda activate xregrid
+mamba activate xregrid
 ```
 
-### 2. Manual Conda Installation
+### 2. Manual Mamba Installation
 
 If you prefer to set up the environment manually:
 
 ```bash
 # Create a new environment
-conda create -n xregrid python>=3.9
+mamba create -n xregrid python>=3.9
 
 # Activate the environment
-conda activate xregrid
+mamba activate xregrid
 
 # Install dependencies
-conda install -c conda-forge esmpy cf-xarray xesmf xarray numpy scipy dask netcdf4 pandas pytest
+mamba install -c conda-forge esmpy cf-xarray xesmf xarray numpy scipy dask netcdf4 pandas pytest
 
 # Install xregrid from source
 pip install -e .
@@ -145,7 +145,7 @@ XRegrid requires the following packages:
 
 This usually means ESMF/ESMPy is not properly installed. Try:
 
-1. Installing via conda: `conda install -c conda-forge esmpy`
+1. Installing via mamba: `mamba install -c conda-forge esmpy`
 2. Checking that `ESMF_DIR` is set correctly if building from source
 3. Verifying that the ESMF library is compatible with your system
 
