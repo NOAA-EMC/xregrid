@@ -146,6 +146,33 @@ def load_esmf_file(filepath: str) -> xr.Dataset:
     return ds
 
 
+def update_history(
+    obj: Union[xr.DataArray, xr.Dataset], message: str
+) -> Union[xr.DataArray, xr.Dataset]:
+    """
+    Update the 'history' attribute of an xarray object with a timestamped message.
+
+    Parameters
+    ----------
+    obj : xr.DataArray or xr.Dataset
+        The xarray object to update.
+    message : str
+        The message to add to the history.
+
+    Returns
+    -------
+    xr.DataArray or xr.Dataset
+        The updated xarray object.
+    """
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    full_message = f"{timestamp}: {message}"
+    if "history" in obj.attrs:
+        obj.attrs["history"] = f"{full_message}\n" + obj.attrs["history"]
+    else:
+        obj.attrs["history"] = full_message
+    return obj
+
+
 def create_grid_from_crs(
     crs: Union[str, int, pyproj.CRS],
     extent: Tuple[float, float, float, float],
@@ -236,8 +263,7 @@ def create_grid_from_crs(
         ds["lat"].attrs["bounds"] = "lat_b"
         ds["lon"].attrs["bounds"] = "lon_b"
 
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ds.attrs["history"] = f"{timestamp}: Created grid from CRS {crs} using xregrid."
+    update_history(ds, f"Created grid from CRS {crs} using xregrid.")
 
     return ds
 
@@ -284,35 +310,6 @@ def create_mesh_from_coords(
     )
     ds.attrs["crs"] = crs_obj.to_wkt()
 
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ds.attrs["history"] = (
-        f"{timestamp}: Created mesh from coordinates and CRS {crs} using xregrid."
-    )
+    update_history(ds, f"Created mesh from coordinates and CRS {crs} using xregrid.")
+
     return ds
-
-  
-def update_history(
-    obj: Union[xr.DataArray, xr.Dataset], message: str
-) -> Union[xr.DataArray, xr.Dataset]:
-    """
-    Update the 'history' attribute of an xarray object with a timestamped message.
-
-    Parameters
-    ----------
-    obj : xr.DataArray or xr.Dataset
-        The xarray object to update.
-    message : str
-        The message to add to the history.
-
-    Returns
-    -------
-    xr.DataArray or xr.Dataset
-        The updated xarray object.
-    """
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    full_message = f"{timestamp}: {message}"
-    if "history" in obj.attrs:
-        obj.attrs["history"] = f"{full_message}\n" + obj.attrs["history"]
-    else:
-        obj.attrs["history"] = full_message
-    return obj

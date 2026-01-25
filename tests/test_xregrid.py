@@ -212,7 +212,7 @@ def test_regrid_with_crs_grid():
     assert "x" in out.coords
     assert "y" in out.coords
 
-    
+
 def test_dataset_regrid_identity():
     """Double-Check Test: Verify Dataset regridding matches DataArray regridding for both Eager and Lazy."""
     nlat_in, nlon_in = 10, 20
