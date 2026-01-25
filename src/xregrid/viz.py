@@ -15,6 +15,11 @@ except ImportError:
     ccrs = None
 
 try:
+    import pyproj
+except ImportError:
+    pyproj = None
+
+try:
     import hvplot.xarray  # noqa: F401
 except ImportError:
     hvplot = None
@@ -62,6 +67,44 @@ def plot_static(
         im = da.plot(ax=ax, **kwargs)
         ax.set_title(title)
         return im
+
+    if transform is None and ccrs is not None:
+        # Try to detect CRS from attributes (Aero Protocol)
+        crs_wkt = da.attrs.get("crs") or da.attrs.get("grid_mapping")
+        # Check encoding as well
+        if crs_wkt is None:
+            crs_wkt = da.encoding.get("crs") or da.encoding.get("grid_mapping")
+
+        if crs_wkt and pyproj is not None:
+            try:
+                # Basic support for WKT/Proj4 via pyproj
+                # This is a simplified heuristic
+                # Cartopy can sometimes handle WKT directly in newer versions
+                # or we can try to find a match. For now, we'll try a common approach.
+                # Use pyproj to identify the CRS
+                proj_crs = pyproj.CRS(crs_wkt)
+                if proj_crs.is_projected:
+                    # Try to match with Cartopy projections
+                    # This is a basic mapping for common cases
+                    if proj_crs.utm_zone:
+                        transform = ccrs.UTM(
+                            zone=int(proj_crs.utm_zone[:-1]),
+                            southern_hemisphere="S" in proj_crs.utm_zone,
+                        )
+                    elif proj_crs.name.startswith("UTM zone"):
+                        import re
+
+                        zone = re.search(r"zone (\d+)([NS])", proj_crs.name)
+                        if zone:
+                            transform = ccrs.UTM(
+                                zone=int(zone.group(1)),
+                                southern_hemisphere=zone.group(2) == "S",
+                            )
+                # If we can't easily map it, we'll fall back to PlateCarree
+                # or a generic CRS if cartopy supports it.
+                # Many xregrid outputs will have 'lat'/'lon' as 2D coords even if projected.
+            except Exception:
+                pass
 
     if projection is None:
         projection = ccrs.PlateCarree()

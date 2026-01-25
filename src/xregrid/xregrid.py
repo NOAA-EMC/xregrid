@@ -485,8 +485,9 @@ class Regridder:
             if self.skipna:
                 mask = np.isnan(flat_data)
                 safe_data = np.where(mask, 0.0, flat_data)
-                result = safe_data @ self._weights_matrix.T
-                weights_sum = (~mask).astype(float) @ self._weights_matrix.T
+                # Optimized CSR application: (matrix @ data.T).T is faster than data @ matrix.T
+                result = (self._weights_matrix @ safe_data.T).T
+                weights_sum = (self._weights_matrix @ (~mask).astype(float).T).T
                 with np.errstate(divide="ignore", invalid="ignore"):
                     final_result = result / weights_sum
                     if self._total_weights is not None:
@@ -498,7 +499,8 @@ class Regridder:
                         )
                 result = final_result
             else:
-                result = flat_data @ self._weights_matrix.T
+                # Optimized CSR application: (matrix @ data.T).T is faster than data @ matrix.T
+                result = (self._weights_matrix @ flat_data.T).T
 
             new_shape = other_dims_shape + self._shape_target
             return result.reshape(new_shape)
