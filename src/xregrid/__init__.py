@@ -6,10 +6,10 @@ from .utils import (
     load_esmf_file,
 )
 from .viz import plot_interactive, plot_static
-from .xregrid import ESMPyRegridder
+from .xregrid import Regridder
 
 __all__ = [
-    "ESMPyRegridder",
+    "Regridder",
     "plot_static",
     "plot_interactive",
     "create_global_grid",
