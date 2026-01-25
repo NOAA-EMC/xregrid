@@ -53,6 +53,7 @@ class Regridder:
         skipna: bool = False,
         na_thres: float = 1.0,
         periodic: bool = False,
+        mpi: bool = False,
     ) -> None:
         """
         Initialize the Regridder.
@@ -77,9 +78,15 @@ class Regridder:
             Threshold for NaN handling.
         periodic : bool, default False
             Whether the grid is periodic in longitude.
+        mpi : bool, default False
+            Whether to use MPI for parallel weight generation.
+            Requires running with mpirun and having mpi4py installed for gathering.
         """
         # Initialize ESMF Manager (required for some environments)
-        self._manager = esmpy.Manager(debug=False)
+        if mpi:
+            self._manager = esmpy.Manager(logkind=esmpy.LogKind.MULTI, debug=False)
+        else:
+            self._manager = esmpy.Manager(debug=False)
 
         self.source_grid_ds = source_grid_ds
         self.target_grid_ds = target_grid_ds
@@ -362,9 +369,44 @@ class Regridder:
 
         weights = regrid.get_weights_dict(deep_copy=True)
 
-        rows = weights["row_dst"] - 1
-        cols = weights["col_src"] - 1
-        data = weights["weights"]
+        # Handle MPI gathering if multiple ranks are present
+        pet_count = esmpy.pet_count()
+        local_pet = esmpy.local_pet()
+
+        if pet_count > 1:
+            try:
+                from mpi4py import MPI
+
+                comm = MPI.COMM_WORLD
+                # Gather all weights to rank 0
+                all_weights = comm.gather(weights, root=0)
+
+                if local_pet == 0:
+                    # Concatenate all gathered weights
+                    rows = np.concatenate([w["row_dst"] for w in all_weights]) - 1
+                    cols = np.concatenate([w["col_src"] for w in all_weights]) - 1
+                    data = np.concatenate([w["weights"] for w in all_weights])
+                else:
+                    # Non-root ranks will have empty weight arrays to avoid duplicate computation.
+                    # Only the root rank builds the full sparse matrix for Dask-based application.
+                    rows = np.array([], dtype=np.int32)
+                    cols = np.array([], dtype=np.int32)
+                    data = np.array([], dtype=np.float64)
+            except ImportError:
+                import warnings
+
+                warnings.warn(
+                    "Multiple ESMF PETs detected but mpi4py is not installed. "
+                    "Weights will not be gathered to rank 0, which may lead to incorrect results "
+                    "if the application is not also parallelized via MPI."
+                )
+                rows = weights["row_dst"] - 1
+                cols = weights["col_src"] - 1
+                data = weights["weights"]
+        else:
+            rows = weights["row_dst"] - 1
+            cols = weights["col_src"] - 1
+            data = weights["weights"]
 
         n_src = int(np.prod(self._shape_source))
         n_dst = int(np.prod(self._shape_target))
@@ -378,6 +420,9 @@ class Regridder:
 
     def _save_weights(self) -> None:
         """Save weights to a NetCDF file."""
+        if esmpy.local_pet() != 0:
+            return  # Only rank 0 saves weights
+
         if self._weights_matrix is None:
             raise RuntimeError("Weights have not been generated yet.")
 

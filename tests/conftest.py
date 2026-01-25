@@ -19,6 +19,8 @@ except ImportError:
 
     # Mock Manager
     mock_esmpy.Manager.return_value = MagicMock()
+    mock_esmpy.pet_count.return_value = 1
+    mock_esmpy.local_pet.return_value = 0
 
     # Mock Grid
     mock_grid = MagicMock()
