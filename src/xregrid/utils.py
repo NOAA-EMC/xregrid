@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime
-from typing import Optional, Tuple, Union
+from typing import Tuple, Union
 
 import numpy as np
 import pyproj
