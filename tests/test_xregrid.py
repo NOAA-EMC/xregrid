@@ -2,7 +2,7 @@ import dask.array as da
 import numpy as np
 import pytest
 import xarray as xr
-from xregrid import ESMPyRegridder
+from xregrid import ESMPyRegridder, create_grid_from_crs, create_global_grid
 
 
 def create_sample_dataset(
@@ -193,3 +193,21 @@ def test_weights_format():
     target_ds = create_sample_dataset(nlat=15, nlon=25)
     regridder = ESMPyRegridder(source_ds, target_ds)
     assert isinstance(regridder._weights_matrix, csr_matrix)
+
+
+def test_regrid_with_crs_grid():
+    # Source grid: global 10 degree
+    src_ds = create_global_grid(res_lat=10, res_lon=10)
+    src_ds["data"] = (("lat", "lon"), np.ones((src_ds.lat.size, src_ds.lon.size)))
+
+    # Target grid: UTM zone 33N
+    extent = (400000, 500000, 5000000, 5100000)
+    res = 10000
+    tgt_ds = create_grid_from_crs("EPSG:32633", extent, res)
+
+    regridder = ESMPyRegridder(src_ds, tgt_ds, method="bilinear")
+    out = regridder(src_ds["data"])
+
+    assert out.shape == (tgt_ds.y.size, tgt_ds.x.size)
+    assert "x" in out.coords
+    assert "y" in out.coords
