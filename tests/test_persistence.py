@@ -1,8 +1,8 @@
 import os
 import numpy as np
 import xarray as xr
-import pytest
 from xregrid import ESMPyRegridder, create_global_grid
+
 
 def create_sample_data(dask=False, seed=None):
     """Create sample data for testing."""
@@ -14,11 +14,12 @@ def create_sample_data(dask=False, seed=None):
         data,
         coords={"lat": ds.lat, "lon": ds.lon},
         dims=["lat", "lon"],
-        name="test_data"
+        name="test_data",
     )
     if dask:
         da = da.chunk({"lat": 9, "lon": 18})
     return da, ds
+
 
 def test_weight_persistence_eager_lazy(tmp_path):
     """
@@ -33,10 +34,11 @@ def test_weight_persistence_eager_lazy(tmp_path):
 
     # 2. Generate and save weights
     regridder_save = ESMPyRegridder(
-        source_grid, target_grid,
-        method='bilinear',
+        source_grid,
+        target_grid,
+        method="bilinear",
         reuse_weights=True,
-        filename=filename
+        filename=filename,
     )
 
     res_original = regridder_save(source_da)
@@ -44,10 +46,11 @@ def test_weight_persistence_eager_lazy(tmp_path):
 
     # 3. Load weights in a new regridder
     regridder_load = ESMPyRegridder(
-        source_grid, target_grid,
-        method='bilinear',
+        source_grid,
+        target_grid,
+        method="bilinear",
         reuse_weights=True,
-        filename=filename
+        filename=filename,
     )
 
     # Verify eager result identity
@@ -72,6 +75,7 @@ def test_weight_persistence_eager_lazy(tmp_path):
     res_original_no_hist.attrs.pop("history", None)
     xr.testing.assert_allclose(res_original_no_hist, res_eager_no_hist)
 
+
 def test_weight_persistence_skipna(tmp_path):
     """Test persistence with skipna=True."""
     filename = str(tmp_path / "weights_skipna.nc")
@@ -83,21 +87,23 @@ def test_weight_persistence_skipna(tmp_path):
     target_grid = create_global_grid(res_lat=5.0, res_lon=5.0)
 
     regridder_save = ESMPyRegridder(
-        source_grid, target_grid,
-        method='bilinear',
+        source_grid,
+        target_grid,
+        method="bilinear",
         reuse_weights=True,
         filename=filename,
-        skipna=True
+        skipna=True,
     )
 
     res_save = regridder_save(source_da)
 
     regridder_load = ESMPyRegridder(
-        source_grid, target_grid,
-        method='bilinear',
+        source_grid,
+        target_grid,
+        method="bilinear",
         reuse_weights=True,
         filename=filename,
-        skipna=True
+        skipna=True,
     )
 
     res_load = regridder_load(source_da)
