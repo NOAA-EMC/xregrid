@@ -110,10 +110,29 @@ class Regridder:
 
         if reuse_weights and os.path.exists(filename):
             self._load_weights()
+            # Validate loaded weights against provided grids
+            self._validate_weights()
         else:
             self._generate_weights()
             if reuse_weights:
                 self._save_weights()
+
+    def _validate_weights(self) -> None:
+        """Validate loaded weights against the provided source and target grids."""
+        # Get current grid info
+        _, _, src_shape, src_dims, _ = self._get_mesh_info(self.source_grid_ds)
+        _, _, dst_shape, dst_dims, _ = self._get_mesh_info(self.target_grid_ds)
+
+        if src_shape != self._shape_source:
+            raise ValueError(
+                f"Source grid shape {src_shape} does not match "
+                f"loaded weights source shape {self._shape_source}"
+            )
+        if dst_shape != self._shape_target:
+            raise ValueError(
+                f"Target grid shape {dst_shape} does not match "
+                f"loaded weights target shape {self._shape_target}"
+            )
 
     def _get_mesh_info(
         self, ds: xr.Dataset
@@ -510,13 +529,14 @@ class Regridder:
 
         # Use allow_rechunk=True to support chunked core dimensions
         # and move output_sizes to dask_gufunc_kwargs for future compatibility
+        # vectorize=False because _apply_weights handles non-core dimensions
         out = xr.apply_ufunc(
             _apply_weights,
             da_in,
             input_core_dims=[input_core_dims],
             output_core_dims=[temp_output_core_dims],
             dask="parallelized",
-            vectorize=True,
+            vectorize=False,
             output_dtypes=[da_in.dtype],
             dask_gufunc_kwargs={
                 "output_sizes": {
@@ -530,7 +550,8 @@ class Regridder:
             {temp: orig for temp, orig in zip(temp_output_core_dims, self._dims_target)}
         )
 
-        # Preserve attributes
+        # Preserve name and attributes
+        out.name = da_in.name
         out.attrs.update(da_in.attrs)
 
         # Assign coordinates from target grid
