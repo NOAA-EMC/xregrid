@@ -45,8 +45,6 @@ jobs:
 
       - name: Build documentation
         shell: bash -l {0}
-        env:
-          XREGRID_MOCK_ESMPY: 1
         run: |
           # Workaround for Python 3.14 compatibility with mkdocs-gallery
           # ast.Str was removed in 3.14, so we monkeypatch it if necessary
