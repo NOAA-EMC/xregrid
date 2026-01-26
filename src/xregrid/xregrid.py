@@ -374,6 +374,14 @@ class Regridder:
                     lon_b = ds["lon_b"]
 
             has_bounds = lat_b is not None and lon_b is not None
+
+            if self.method == "conservative" and not has_bounds:
+                raise ValueError(
+                    f"Conservative regridding requires cell boundaries (bounds) for "
+                    f"{'source' if is_source else 'target'} grid. "
+                    "Ensure your dataset has 'lat_b' and 'lon_b' or CF-compliant bounds."
+                )
+
             staggerlocs = [esmpy.StaggerLoc.CENTER]
             if has_bounds:
                 staggerlocs.append(esmpy.StaggerLoc.CORNER)
