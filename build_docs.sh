@@ -29,7 +29,6 @@ echo "Building documentation..."
 # Workaround for Python 3.14 compatibility with mkdocs-gallery
 # ast.Str was removed in 3.14, so we monkeypatch it if necessary
 export PYTHONPATH=$PYTHONPATH:$(pwd)/src
-# To build without esmpy installed (e.g. on ReadTheDocs), set XREGRID_MOCK_ESMPY=1
 python -c "import ast; \
 ast.Str = getattr(ast, 'Str', ast.Constant); \
 ast.Num = getattr(ast, 'Num', ast.Constant); \

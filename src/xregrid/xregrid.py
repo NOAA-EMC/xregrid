@@ -11,42 +11,7 @@ from scipy.sparse import coo_matrix
 try:
     import esmpy
 except ImportError:
-    if os.environ.get("XREGRID_MOCK_ESMPY") == "1":
-        from unittest.mock import MagicMock
-
-        esmpy = MagicMock()
-        esmpy.CoordSys.SPH_DEG = 1
-        esmpy.StaggerLoc.CENTER = 0
-        esmpy.StaggerLoc.CORNER = 1
-        esmpy.GridItem.MASK = 1
-        esmpy.RegridMethod.BILINEAR = 0
-        esmpy.RegridMethod.CONSERVE = 1
-        esmpy.RegridMethod.NEAREST_STOD = 2
-        esmpy.RegridMethod.NEAREST_DTOS = 3
-        esmpy.RegridMethod.PATCH = 4
-        esmpy.UnmappedAction.IGNORE = 1
-        esmpy.ExtrapMethod.NEAREST_STOD = 0
-        esmpy.ExtrapMethod.NEAREST_IDAVG = 1
-        esmpy.ExtrapMethod.CREEP_FILL = 2
-        esmpy.Manager.return_value = MagicMock()
-        esmpy.pet_count.return_value = 1
-        esmpy.local_pet.return_value = 0
-
-        # Mock Regrid to return some dummy weights if called
-        mock_regrid = MagicMock()
-        mock_regrid.get_factors.return_value = (np.array([0]), np.array([0]))
-
-        def get_weights_dict(**kwargs):
-            return {
-                "row_dst": np.array([1]),
-                "col_src": np.array([1]),
-                "weights": np.array([1.0]),
-            }
-
-        mock_regrid.get_weights_dict = get_weights_dict
-        esmpy.Regrid.return_value = mock_regrid
-    else:
-        esmpy = None
+    esmpy = None
 
 from .utils import update_history
 
