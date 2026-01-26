@@ -45,8 +45,18 @@ jobs:
 
       - name: Build documentation
         shell: bash -l {0}
+        env:
+          XREGRID_MOCK_ESMPY: 1
         run: |
-          micromamba run -n xregrid-env mkdocs build --clean
+          # Workaround for Python 3.14 compatibility with mkdocs-gallery
+          # ast.Str was removed in 3.14, so we monkeypatch it if necessary
+          export PYTHONPATH=$PYTHONPATH:$(pwd)/src
+          micromamba run -n xregrid-env python -c "import ast; \
+          ast.Str = getattr(ast, 'Str', ast.Constant); \
+          ast.Num = getattr(ast, 'Num', ast.Constant); \
+          ast.Bytes = getattr(ast, 'Bytes', ast.Constant); \
+          ast.NameConstant = getattr(ast, 'NameConstant', ast.Constant); \
+          from mkdocs.__main__ import cli; cli()" build --clean
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
