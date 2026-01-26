@@ -33,16 +33,18 @@ ds_unstructured = xr.Dataset(
     coords={
         "lat": (["nCells"], lats, {"units": "degrees_north"}),
         "lon": (["nCells"], lons, {"units": "degrees_east"}),
-    }
+    },
 )
 
 # 2. Define a standard rectilinear target grid (e.g., 4° global)
 target_lat = np.arange(-90, 91, 4.0)
 target_lon = np.arange(0, 361, 4.0)
-target_grid = xr.Dataset({
-    "lat": (["lat"], target_lat, {"units": "degrees_north"}),
-    "lon": (["lon"], target_lon, {"units": "degrees_east"})
-})
+target_grid = xr.Dataset(
+    {
+        "lat": (["lat"], target_lat, {"units": "degrees_north"}),
+        "lon": (["lon"], target_lon, {"units": "degrees_east"}),
+    }
+)
 
 # 3. Create the regridder
 # For unstructured source data without connectivity, we use nearest-neighbor
@@ -55,8 +57,15 @@ ds_regridded = regridder(ds_unstructured)
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
 # Plot unstructured points
-sc = ax1.scatter(ds_unstructured.lon, ds_unstructured.lat, c=ds_unstructured.data,
-                s=30, cmap="viridis", edgecolor='none', alpha=0.7)
+sc = ax1.scatter(
+    ds_unstructured.lon,
+    ds_unstructured.lat,
+    c=ds_unstructured.data,
+    s=30,
+    cmap="viridis",
+    edgecolor="none",
+    alpha=0.7,
+)
 ax1.set_title(f"Unstructured Source Points ({n_cells} cells)")
 ax1.set_xlabel("Longitude")
 ax1.set_ylabel("Latitude")
@@ -69,7 +78,7 @@ ax2.set_title("Regridded to Rectilinear Grid (4°)")
 plt.tight_layout()
 plt.show()
 
-print(f"\nRegridding Summary:")
+print("\nRegridding Summary:")
 print(f"Source: Unstructured ({n_cells} cells)")
 print(f"Target: Rectilinear ({len(target_lat)}x{len(target_lon)})")
 print(f"Method: {regridder.method}")

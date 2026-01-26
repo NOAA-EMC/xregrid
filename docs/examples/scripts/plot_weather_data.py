@@ -41,10 +41,12 @@ print(ds)
 # 2. Define a target grid for the region
 target_lat = np.linspace(38, 44, 50)
 target_lon = np.linspace(265, 276, 50)
-target_grid = xr.Dataset({
-    "lat": (["lat"], target_lat, {"units": "degrees_north"}),
-    "lon": (["lon"], target_lon, {"units": "degrees_east"})
-})
+target_grid = xr.Dataset(
+    {
+        "lat": (["lat"], target_lat, {"units": "degrees_north"}),
+        "lon": (["lon"], target_lon, {"units": "degrees_east"}),
+    }
+)
 
 # 3. Regrid from points to grid
 # For points, we use nearest-neighbor methods
@@ -57,7 +59,9 @@ ds_regridded = regridder(ds)
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
 # Plot stations as points
-sc = ax1.scatter(ds.lon, ds.lat, c=ds.tmax.isel(time=0), s=200, cmap="viridis", edgecolor="k")
+sc = ax1.scatter(
+    ds.lon, ds.lat, c=ds.tmax.isel(time=0), s=200, cmap="viridis", edgecolor="k"
+)
 plt.colorbar(sc, ax=ax1, label="Temperature")
 ax1.set_title("Station Data (tmax, day 0)")
 ax1.set_xlabel("Longitude")

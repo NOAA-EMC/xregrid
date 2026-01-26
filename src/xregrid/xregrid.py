@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from typing import TYPE_CHECKING, Optional, Tuple, Union
 
 import cf_xarray  # noqa: F401
@@ -14,6 +13,7 @@ try:
 except ImportError:
     if os.environ.get("XREGRID_MOCK_ESMPY") == "1":
         from unittest.mock import MagicMock
+
         esmpy = MagicMock()
         esmpy.CoordSys.SPH_DEG = 1
         esmpy.StaggerLoc.CENTER = 0
@@ -35,12 +35,14 @@ except ImportError:
         # Mock Regrid to return some dummy weights if called
         mock_regrid = MagicMock()
         mock_regrid.get_factors.return_value = (np.array([0]), np.array([0]))
+
         def get_weights_dict(**kwargs):
             return {
                 "row_dst": np.array([1]),
                 "col_src": np.array([1]),
                 "weights": np.array([1.0]),
             }
+
         mock_regrid.get_weights_dict = get_weights_dict
         esmpy.Regrid.return_value = mock_regrid
     else:

@@ -19,10 +19,12 @@ print(f"Source coordinates: xc (lon) and yc (lat) are {ds.xc.dims}")
 # Define a standard rectilinear target grid (e.g., 1.0° global)
 target_lat = np.arange(50, 91, 1.0)
 target_lon = np.arange(0, 360, 1.0)
-target_grid = xr.Dataset({
-    "lat": (["lat"], target_lat, {"units": "degrees_north"}),
-    "lon": (["lon"], target_lon, {"units": "degrees_east"})
-})
+target_grid = xr.Dataset(
+    {
+        "lat": (["lat"], target_lat, {"units": "degrees_north"}),
+        "lon": (["lon"], target_lon, {"units": "degrees_east"}),
+    }
+)
 
 # XRegrid automatically detects the 2D coordinates in 'rasm'
 regridder = Regridder(ds, target_grid, method="bilinear")

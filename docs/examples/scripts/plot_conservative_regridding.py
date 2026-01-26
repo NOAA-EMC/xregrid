@@ -21,10 +21,12 @@ ds = xr.tutorial.open_dataset("air_temperature").isel(time=0)
 # Create a coarser target grid
 target_lat = np.linspace(ds.lat.min().values, ds.lat.max().values, 10)
 target_lon = np.linspace(ds.lon.min().values, ds.lon.max().values, 15)
-target_grid = xr.Dataset({
-    "lat": (["lat"], target_lat, {"units": "degrees_north"}),
-    "lon": (["lon"], target_lon, {"units": "degrees_east"})
-})
+target_grid = xr.Dataset(
+    {
+        "lat": (["lat"], target_lat, {"units": "degrees_north"}),
+        "lon": (["lon"], target_lon, {"units": "degrees_east"}),
+    }
+)
 
 # Create conservative regridder
 regridder = Regridder(ds, target_grid, method="conservative")

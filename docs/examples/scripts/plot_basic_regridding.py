@@ -25,10 +25,12 @@ print(f"Source grid shape: {ds.u.shape}")
 # Create a coarser target grid (2.0° resolution)
 target_lat = np.arange(-90, 91, 2.0)
 target_lon = np.arange(-180, 180, 2.0)
-target_grid = xr.Dataset({
-    "lat": (["lat"], target_lat, {"units": "degrees_north"}),
-    "lon": (["lon"], target_lon, {"units": "degrees_east"})
-})
+target_grid = xr.Dataset(
+    {
+        "lat": (["lat"], target_lat, {"units": "degrees_north"}),
+        "lon": (["lon"], target_lon, {"units": "degrees_east"}),
+    }
+)
 
 # Create the regridder
 # periodic=True is essential for global grids to handle the dateline
@@ -50,7 +52,7 @@ plt.tight_layout()
 plt.show()
 
 # Summary of the operation
-print(f"\nRegridding Summary:")
+print("\nRegridding Summary:")
 print(f"Method: {regridder.method}")
 print(f"Periodic: {regridder.periodic}")
 print(f"Input dimensions: {ds.u.dims}")
