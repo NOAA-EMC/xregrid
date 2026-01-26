@@ -16,6 +16,9 @@ except ImportError:
     mock_esmpy.RegridMethod.NEAREST_DTOS = 3
     mock_esmpy.RegridMethod.PATCH = 4
     mock_esmpy.UnmappedAction.IGNORE = 1
+    mock_esmpy.ExtrapMethod.NEAREST_STOD = 0
+    mock_esmpy.ExtrapMethod.NEAREST_IDW = 1
+    mock_esmpy.ExtrapMethod.CREEP_FILL = 2
 
     # Mock Manager
     mock_esmpy.Manager.return_value = MagicMock()

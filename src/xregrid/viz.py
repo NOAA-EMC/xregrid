@@ -75,6 +75,16 @@ def plot_static(
         if crs_wkt is None:
             crs_wkt = da.encoding.get("crs") or da.encoding.get("grid_mapping")
 
+        # Try cf-xarray if available
+        if crs_wkt is None:
+            try:
+                # Use cf-xarray to find the grid mapping variable
+                gm_var = da.cf.get_grid_mapping()
+                if gm_var is not None:
+                    crs_wkt = gm_var.attrs.get("crs_wkt")
+            except (AttributeError, KeyError, ImportError):
+                pass
+
         if crs_wkt and pyproj is not None:
             try:
                 # Use pyproj to identify the CRS
@@ -125,6 +135,19 @@ def plot_static(
     # Enforce transform for geospatial accuracy (Aero Protocol)
     if "transform" not in kwargs:
         kwargs["transform"] = transform
+
+    # Aero Protocol: No Ambiguous Plots.
+    # If ndim > 2 and no faceting is requested, select first slice.
+    if da.ndim > 2 and "col" not in kwargs and "row" not in kwargs:
+        import warnings
+
+        first_slice = {d: 0 for d in da.dims[:-2]}
+        warnings.warn(
+            f"DataArray has {da.ndim} dimensions. "
+            f"Automatically selecting the first slice along {list(first_slice.keys())}: {first_slice}. "
+            "To plot other slices, subset your data before calling plot_static or use 'col'/'row' for facets."
+        )
+        da = da.isel(first_slice)
 
     im = da.plot(ax=ax, **kwargs)
 
