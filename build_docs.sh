@@ -13,7 +13,7 @@ fi
 
 # Install documentation dependencies if needed
 echo "Checking documentation dependencies..."
-pip install mkdocs mkdocs-material mkdocs-gallery mkdocs-autorefs mkdocstrings mkdocstrings-python matplotlib --quiet
+pip install mkdocs mkdocs-material mkdocs-gallery mkdocs-autorefs mkdocstrings mkdocstrings-python matplotlib cartopy pooch --quiet
 
 # Install package in development mode
 echo "Installing xregrid package..."
