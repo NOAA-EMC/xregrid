@@ -115,7 +115,7 @@ class Regridder:
 
         self.extrap_method_map = {
             "nearest_s2d": esmpy.ExtrapMethod.NEAREST_STOD,
-            "nearest_idw": esmpy.ExtrapMethod.NEAREST_IDW,
+            "nearest_idw": esmpy.ExtrapMethod.NEAREST_IDAVG,
             "creep_fill": esmpy.ExtrapMethod.CREEP_FILL,
         }
 

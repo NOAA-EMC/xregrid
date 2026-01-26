@@ -17,7 +17,7 @@ except ImportError:
     mock_esmpy.RegridMethod.PATCH = 4
     mock_esmpy.UnmappedAction.IGNORE = 1
     mock_esmpy.ExtrapMethod.NEAREST_STOD = 0
-    mock_esmpy.ExtrapMethod.NEAREST_IDW = 1
+    mock_esmpy.ExtrapMethod.NEAREST_IDAVG = 1
     mock_esmpy.ExtrapMethod.CREEP_FILL = 2
 
     # Mock Manager
