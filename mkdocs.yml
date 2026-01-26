@@ -13,11 +13,7 @@ nav:
     - Quick Start: user-guide/quickstart.md
     - Performance: user-guide/performance.md
   - Examples:
-    - Gallery Overview: examples/index.md
-    - Basic Regridding: examples/basic-regridding.md
-    - Conservative Regridding: examples/conservative-regridding.md
-    - Unstructured Grids: examples/unstructured-grids.md
-    - Performance Tips: examples/performance-optimization.md
+    - Gallery: examples/generated/index.md
   - API Reference:
     - Regridder: api/regridder.md
     - Utilities: api/utils.md
@@ -50,6 +46,9 @@ theme:
 
 plugins:
   - search
+  - gallery:
+      examples_dirs: docs/examples/scripts
+      gallery_dirs: docs/examples/generated
   - mkdocstrings:
       handlers:
         python:

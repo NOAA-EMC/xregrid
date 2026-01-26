@@ -21,28 +21,21 @@ XRegrid is a high-performance regridding library that builds on top of ESMF (Ear
 
 ```python
 import xarray as xr
+from xregrid import Regridder
+
+# Load tutorial data
+ds = xr.tutorial.open_dataset("air_temperature").isel(time=0)
+
+# Define a target grid (e.g., 1.0° resolution)
 import numpy as np
-from xregrid import Regridder, create_global_grid
+target_grid = xr.Dataset({
+    "lat": (["lat"], np.arange(15, 76, 1.0)),
+    "lon": (["lon"], np.arange(200, 331, 1.0))
+})
 
-# Create source and target grids
-source_grid = create_global_grid(res_lat=1.0, res_lon=1.0)
-target_grid = create_global_grid(res_lat=0.5, res_lon=0.5)
-
-# Create regridder
-regridder = Regridder(
-    source_grid, target_grid,
-    method='bilinear',
-    periodic=True
-)
-
-# Apply to your data
-temperature = xr.DataArray(
-    np.random.rand(10, 180, 360),
-    dims=['time', 'lat', 'lon'],
-    coords={'lat': source_grid.lat, 'lon': source_grid.lon}
-)
-
-temperature_regridded = regridder(temperature)
+# Create regridder and apply
+regridder = Regridder(ds, target_grid, method='bilinear')
+air_regridded = regridder(ds.air)
 ```
 
 ## Installation
@@ -64,8 +57,8 @@ pip install .
 
 Full documentation is available at [https://xregrid.readthedocs.io](https://xregrid.readthedocs.io)
 
-- [Quick Start Guide](docs/user-guide/quickstart.md)
-- [API Reference](docs/api/regridder.md)
+- [Quick Start Guide](https://xregrid.readthedocs.io/user-guide/quickstart/)
+- [API Reference](https://xregrid.readthedocs.io/api/regridder/)
 
 ## Contributing
 

@@ -168,7 +168,7 @@ For large grids:
 
 ### Getting Help
 
-- Check the [Examples Gallery](examples/index.md) for common use cases
+- Check the [Examples Gallery](examples/generated/index.md) for common use cases
 - Review the [API documentation](api/regridder.md) for detailed parameter descriptions
 - Submit issues on GitHub for bugs or feature requests
 

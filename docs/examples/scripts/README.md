@@ -1,35 +1,20 @@
 # XRegrid Examples Gallery
 
-This gallery demonstrates the capabilities of XRegrid through practical, runnable examples.
+This gallery demonstrates the capabilities of XRegrid through practical, runnable examples leveraging standard xarray tutorial datasets.
 
-## Overview
+## Examples Overview
 
-XRegrid provides high-performance regridding for earth science applications. These examples showcase:
+### [Basic Regridding](plot_basic_regridding.py)
+Standard rectilinear grid regridding using ERA-Interim data.
 
-- **Basic Operations**: Getting started with common regridding tasks
-- **Advanced Features**: Handling different grid types and optimization techniques
-- **Real-world Applications**: Practical examples for climate and atmospheric science
+### [Conservative Regridding](plot_conservative_regridding.py)
+Flux-conserving interpolation essential for preserving area-weighted integrals.
 
-## Examples Description
+### [Curvilinear Grids](plot_curvilinear_grids.py)
+Regridding from curvilinear Arctic grids (RASM) to standard rectilinear grids.
 
-### Basic Regridding
-Demonstrates standard rectilinear grid regridding from 1° to 0.5° resolution using bilinear interpolation.
+### [Weather Data: Station to Grid](plot_weather_data.py)
+Regridding station-like point data to a regular 2D grid using nearest-neighbor methods.
 
-### Conservative Regridding
-Shows flux-conserving interpolation essential for precipitation and radiation data.
-
-### Unstructured Grids
-Illustrates regridding from unstructured grids (MPAS/ICON style) to structured grids.
-
-### Performance Optimization
-Focuses on weight reuse and other optimization techniques for production workflows.
-
-## Running the Examples
-
-Each example is self-contained and includes synthetic data generation. To run:
-
-```bash
-python plot_basic_regridding.py
-```
-
-The examples generate both plots and performance metrics to help you understand XRegrid's capabilities.
+### [Performance Optimization](plot_performance_optimization.py)
+Efficient workflows using weight reuse to speed up repeated regridding operations.

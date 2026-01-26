@@ -139,7 +139,7 @@ venv.bak/
 
 # mkdocs documentation
 site/
-docs/examples/auto_examples/
+docs/examples/generated/
 
 # mypy
 .mypy_cache/
