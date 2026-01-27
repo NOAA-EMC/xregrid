@@ -6,6 +6,7 @@ import xarray as xr
 from xregrid import Regridder, create_global_grid
 from xregrid.viz import plot_static
 
+
 def test_no_hidden_compute_on_weight_load():
     """Verify that dask-backed coordinates are not computed when loading weights."""
     # We use a callback to detect compute
@@ -21,10 +22,20 @@ def test_no_hidden_compute_on_weight_load():
     lat = da.from_array(np.linspace(-90, 90, 10), chunks=5)
     lon = da.from_array(np.linspace(0, 360, 20), chunks=10)
 
-    src_grid = xr.Dataset(coords={
-        "lat": (["lat"], lat, {"units": "degrees_north", "standard_name": "latitude"}),
-        "lon": (["lon"], lon, {"units": "degrees_east", "standard_name": "longitude"})
-    })
+    src_grid = xr.Dataset(
+        coords={
+            "lat": (
+                ["lat"],
+                lat,
+                {"units": "degrees_north", "standard_name": "latitude"},
+            ),
+            "lon": (
+                ["lon"],
+                lon,
+                {"units": "degrees_east", "standard_name": "longitude"},
+            ),
+        }
+    )
 
     # Create a weights file first (this WILL trigger compute because we generate weights)
     # We use a small grid that matches the mock in conftest
@@ -52,6 +63,7 @@ def test_no_hidden_compute_on_weight_load():
     if os.path.exists(filename):
         os.remove(filename)
 
+
 def test_plot_static_robust_slicing():
     """Verify plot_static correctly handles non-standard dimension orders using cf-xarray."""
     # Create a 3D DataArray where spatial dims are NOT the last two
@@ -65,17 +77,20 @@ def test_plot_static_robust_slicing():
         data,
         dims=("lat", "time", "lon"),
         coords={"lat": lat, "lon": lon, "time": time},
-        name="test_data"
+        name="test_data",
     )
     da_test.lat.attrs["standard_name"] = "latitude"
     da_test.lon.attrs["standard_name"] = "longitude"
 
     # This should slice 'time' (index 0) and plot ('lat', 'lon')
     # We check that the warning is issued and mentions 'time'
-    with pytest.warns(UserWarning, match=r"Automatically selecting the first slice along \['time'\]"):
+    with pytest.warns(
+        UserWarning, match=r"Automatically selecting the first slice along \['time'\]"
+    ):
         im = plot_static(da_test)
 
     assert im is not None
+
 
 def test_weight_persistence_robustness():
     """Verify that weight attributes survive NetCDF round-trip as tuples."""
