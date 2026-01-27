@@ -141,13 +141,26 @@ def plot_static(
     if da.ndim > 2 and "col" not in kwargs and "row" not in kwargs:
         import warnings
 
-        first_slice = {d: 0 for d in da.dims[:-2]}
-        warnings.warn(
-            f"DataArray has {da.ndim} dimensions. "
-            f"Automatically selecting the first slice along {list(first_slice.keys())}: {first_slice}. "
-            "To plot other slices, subset your data before calling plot_static or use 'col'/'row' for facets."
-        )
-        da = da.isel(first_slice)
+        # Identify spatial dimensions using cf-xarray for robust slicing
+        try:
+            # We look for dimensions associated with latitude and longitude
+            lat_dims = da.cf["latitude"].dims
+            lon_dims = da.cf["longitude"].dims
+            spatial_dims = set(lat_dims) | set(lon_dims)
+        except (KeyError, AttributeError, ImportError):
+            # Fallback to assuming the last two dimensions are spatial
+            spatial_dims = set(da.dims[-2:])
+
+        non_spatial_dims = [d for d in da.dims if d not in spatial_dims]
+
+        if non_spatial_dims:
+            first_slice = {d: 0 for d in non_spatial_dims}
+            warnings.warn(
+                f"DataArray has {da.ndim} dimensions. "
+                f"Automatically selecting the first slice along {list(first_slice.keys())}: {first_slice}. "
+                "To plot other slices, subset your data before calling plot_static or use 'col'/'row' for facets."
+            )
+            da = da.isel(first_slice)
 
     im = da.plot(ax=ax, **kwargs)
 

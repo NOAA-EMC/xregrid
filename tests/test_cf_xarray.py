@@ -29,10 +29,15 @@ def test_cf_coords_detection():
         )
         return ds
 
+    # Target grid also needs bounds for conservative regridding
+    lat_edges_tgt = np.linspace(-90, 90, 16)
+    lon_edges_tgt = np.linspace(-180, 180, 26)
     ds_tgt = xr.Dataset(
         coords={
             "lat": (("lat",), np.linspace(-90, 90, 15), {"units": "degrees_north"}),
             "lon": (("lon",), np.linspace(-180, 180, 25), {"units": "degrees_east"}),
+            "lat_b": (("lat_b",), lat_edges_tgt, {"units": "degrees_north"}),
+            "lon_b": (("lon_b",), lon_edges_tgt, {"units": "degrees_east"}),
         },
     )
 
@@ -83,10 +88,15 @@ def test_cf_bounds_detection():
     ds_src.coords["lat_bounds"] = (("lat", "nv"), lat_bounds)
     ds_src.coords["lon_bounds"] = (("lon", "nv"), lon_bounds)
 
+    # Target grid also needs bounds for conservative regridding
+    lat_edges_tgt = np.linspace(-90, 90, 16)
+    lon_edges_tgt = np.linspace(-180, 180, 26)
     ds_tgt = xr.Dataset(
         coords={
             "lat": (("lat",), np.linspace(-90, 90, 15), {"units": "degrees_north"}),
             "lon": (("lon",), np.linspace(-180, 180, 25), {"units": "degrees_east"}),
+            "lat_b": (("lat_b",), lat_edges_tgt, {"units": "degrees_north"}),
+            "lon_b": (("lon_b",), lon_edges_tgt, {"units": "degrees_east"}),
         },
     )
 

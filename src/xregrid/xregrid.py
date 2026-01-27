@@ -196,7 +196,7 @@ class Regridder:
 
     def _get_mesh_info(
         self, ds: xr.Dataset
-    ) -> Tuple[np.ndarray, np.ndarray, Tuple[int, ...], Tuple[str, ...], bool]:
+    ) -> Tuple[xr.DataArray, xr.DataArray, Tuple[int, ...], Tuple[str, ...], bool]:
         """
         Detect grid type and extract coordinates and shape.
 
@@ -210,10 +210,10 @@ class Regridder:
 
         Returns
         -------
-        lon : numpy.ndarray
-            Longitude values.
-        lat : numpy.ndarray
-            Latitude values.
+        lon : xarray.DataArray
+            Longitude coordinate.
+        lat : xarray.DataArray
+            Latitude coordinate.
         shape : tuple of int
             Grid shape.
         dims : tuple of str
@@ -234,23 +234,22 @@ class Regridder:
                     "Ensure they are named 'lat'/'lon' or have CF attributes."
                 )
 
-        # ESMF requires numpy arrays for grid definition.
-        # While the Aero Protocol prioritizes laziness, the underlying ESMF C++ library
-        # requires concrete memory buffers for grid construction. We therefore
-        # compute coordinate values here if they are dask-backed.
-        lon_vals = lon.values
-        lat_vals = lat.values
-
         if lat.ndim == 2:
             # Curvilinear
-            return lon_vals, lat_vals, lat.shape, lat.dims, False
+            return lon, lat, lat.shape, lat.dims, False
         elif lat.ndim == 1:
             if lat.dims == lon.dims:
                 # Unstructured (e.g. MPAS)
-                return lon_vals, lat_vals, lat.shape, lat.dims, True
+                return lon, lat, lat.shape, lat.dims, True
             else:
                 # Rectilinear
-                lon_mesh, lat_mesh = np.meshgrid(lon_vals, lat_vals)
+                # Use xarray's broadcasting to create the meshgrid lazily
+                # if they are dask-backed.
+                lon_mesh, lat_mesh = xr.broadcast(lon, lat)
+                # Ensure they have the correct order (lat, lon) for the shape
+                lon_mesh = lon_mesh.transpose(lat.dims[0], lon.dims[0])
+                lat_mesh = lat_mesh.transpose(lat.dims[0], lon.dims[0])
+
                 return (
                     lon_mesh,
                     lat_mesh,
@@ -298,14 +297,19 @@ class Regridder:
                     "unstructured grids via LocStream."
                 )
 
+            # ESMF requires numpy arrays for grid definition.
+            # While the Aero Protocol prioritizes laziness, the underlying ESMF C++ library
+            # requires concrete memory buffers for grid construction. We therefore
+            # compute coordinate values here if they are dask-backed.
             locstream = esmpy.LocStream(shape[0], coord_sys=esmpy.CoordSys.SPH_DEG)
-            locstream["ESMF:Lon"] = lon.astype(np.float64)
-            locstream["ESMF:Lat"] = lat.astype(np.float64)
+            locstream["ESMF:Lon"] = lon.values.astype(np.float64)
+            locstream["ESMF:Lat"] = lat.values.astype(np.float64)
             return locstream
         else:
+            # ESMF requires numpy arrays for grid definition.
             # Transpose to (lon, lat) order for ESMF (SPH_DEG convention)
-            lon_f = lon.T
-            lat_f = lat.T
+            lon_f = lon.values.T
+            lat_f = lat.values.T
             shape_f = lon_f.shape  # (nlon, nlat)
 
             # Periodicity configuration
@@ -341,6 +345,8 @@ class Regridder:
             has_bounds = lat_b is not None and lon_b is not None
 
             if self.method == "conservative" and not has_bounds:
+                # print(f"DEBUG: is_source={is_source}, ds={ds}")
+                # print(f"DEBUG: lat_b={lat_b}, lon_b={lon_b}")
                 raise ValueError(
                     f"Conservative regridding requires cell boundaries (bounds) for "
                     f"{'source' if is_source else 'target'} grid. "
@@ -503,10 +509,10 @@ class Regridder:
             attrs={
                 "n_src": self._weights_matrix.shape[1],
                 "n_dst": self._weights_matrix.shape[0],
-                "shape_src": self._shape_source,
-                "shape_dst": self._shape_target,
-                "dims_src": self._dims_source,
-                "dims_target": self._dims_target,
+                "shape_src": list(self._shape_source) if self._shape_source else [],
+                "shape_dst": list(self._shape_target) if self._shape_target else [],
+                "dims_src": list(self._dims_source) if self._dims_source else [],
+                "dims_target": list(self._dims_target) if self._dims_target else [],
                 "is_unstructured_src": int(self._is_unstructured_src),
                 "is_unstructured_tgt": int(self._is_unstructured_tgt),
                 "method": self.method,
@@ -527,10 +533,18 @@ class Regridder:
             data = ds_weights["S"].values
             n_src = ds_weights.attrs["n_src"]
             n_dst = ds_weights.attrs["n_dst"]
-            self._shape_source = tuple(ds_weights.attrs["shape_src"])
-            self._shape_target = tuple(ds_weights.attrs["shape_dst"])
-            self._dims_source = tuple(ds_weights.attrs["dims_src"])
-            self._dims_target = tuple(ds_weights.attrs["dims_target"])
+
+            def _to_tuple(attr: Any) -> Tuple[Any, ...]:
+                if isinstance(attr, str):
+                    # Handle cases where attributes might be stored as string representations
+                    attr = attr.strip("()[]").replace(" ", "").split(",")
+                    return tuple(int(x) if x.isdigit() else x for x in attr if x)
+                return tuple(attr)
+
+            self._shape_source = _to_tuple(ds_weights.attrs["shape_src"])
+            self._shape_target = _to_tuple(ds_weights.attrs["shape_dst"])
+            self._dims_source = _to_tuple(ds_weights.attrs["dims_src"])
+            self._dims_target = _to_tuple(ds_weights.attrs["dims_target"])
             self._is_unstructured_src = bool(ds_weights.attrs["is_unstructured_src"])
             self._is_unstructured_tgt = bool(ds_weights.attrs["is_unstructured_tgt"])
             self._loaded_periodic = bool(ds_weights.attrs.get("periodic", False))
