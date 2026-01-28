@@ -23,15 +23,17 @@ ds = xr.tutorial.open_dataset("air_temperature").isel(time=0)
 # Define a target grid (e.g., 1.0° resolution)
 target_lat = np.arange(15, 76, 1.0)
 target_lon = np.arange(200, 331, 1.0)
-target_grid = xr.Dataset({
-    "lat": (["lat"], target_lat, {"units": "degrees_north"}),
-    "lon": (["lon"], target_lon, {"units": "degrees_east"})
-})
+target_grid = xr.Dataset(
+    {
+        "lat": (["lat"], target_lat, {"units": "degrees_north"}),
+        "lon": (["lon"], target_lon, {"units": "degrees_east"}),
+    }
+)
 
 # --- Part 2: Regridding with XRegrid ---
 # In XRegrid, the entire process of creating grids, fields, and
 # applying the regrid is abstracted into a two-step process.
-regridder = Regridder(ds, target_grid, method='bilinear')
+regridder = Regridder(ds, target_grid, method="bilinear")
 air_regridded = regridder(ds.air)
 
 print("XRegrid regridding complete.")
