@@ -317,36 +317,61 @@ class Regridder:
             periodic_dim = 0 if self.periodic else None
             pole_dim = 1 if self.periodic else None
 
+            def _bounds_to_vertices(b: xr.DataArray) -> np.ndarray:
+                """
+                Convert bounds to vertices for ESMF.
+
+                Handles 1D coordinates (N, 2) -> (N+1,) and 2D coordinates (Y, X, 4) -> (Y+1, X+1).
+                """
+                if b.ndim == 2 and b.shape[-1] == 2:
+                    # 1D coordinates: (N, 2) -> (N+1,)
+                    # This assumes the bounds are contiguous
+                    return np.concatenate([b.values[:, 0], b.values[-1:, 1]])
+                elif b.ndim == 3 and b.shape[-1] == 4:
+                    # 2D coordinates: (Y, X, 4) -> (Y+1, X+1)
+                    # Corners are ordered: 0=(y, x), 1=(y, x+1), 2=(y+1, x+1), 3=(y+1, x)
+                    y_size, x_size, _ = b.shape
+                    vals = b.values
+                    res = np.empty((y_size + 1, x_size + 1))
+                    res[:-1, :-1] = vals[:, :, 0]
+                    res[:-1, -1] = vals[:, -1, 1]
+                    res[-1, -1] = vals[-1, -1, 2]
+                    res[-1, :-1] = vals[-1, :, 3]
+                    return res
+                return b.values
+
             # Attempt to find bounds using cf-xarray or standard names
             lat_b = None
             lon_b = None
-            try:
-                lat_b_da = ds.cf.get_bounds("latitude")
-                lon_b_da = ds.cf.get_bounds("longitude")
 
-                def _bounds_to_vertices(b: xr.DataArray) -> np.ndarray:
-                    """Convert (N, 2) bounds to (N+1,) vertices."""
-                    if b.ndim == 2 and b.shape[-1] == 2:
-                        # Take the first column and the last element of the second column
-                        # This assumes the bounds are contiguous
-                        return np.concatenate([b[:, 0].values, b[-1:, 1].values])
-                    return b.values
+            def _get_bounds(dset):
+                try:
+                    lat_b_da = dset.cf.get_bounds("latitude")
+                    lon_b_da = dset.cf.get_bounds("longitude")
+                    return _bounds_to_vertices(lat_b_da), _bounds_to_vertices(lon_b_da)
+                except (KeyError, AttributeError, ValueError):
+                    if "lat_b" in dset and "lon_b" in dset:
+                        return dset["lat_b"], dset["lon_b"]
+                return None, None
 
-                lat_b = _bounds_to_vertices(lat_b_da)
-                lon_b = _bounds_to_vertices(lon_b_da)
-            except (KeyError, AttributeError):
-                pass
+            lat_b, lon_b = _get_bounds(ds)
 
-            if lat_b is None or lon_b is None:
-                if "lat_b" in ds and "lon_b" in ds:
-                    lat_b = ds["lat_b"]
-                    lon_b = ds["lon_b"]
+            if (lat_b is None or lon_b is None) and self.method == "conservative":
+                # Aero Protocol: Flexibility - Automatically try to generate bounds if missing
+                try:
+                    ds_with_bounds = ds.cf.add_bounds(["latitude", "longitude"])
+                    lat_b, lon_b = _get_bounds(ds_with_bounds)
+                    if lat_b is not None and lon_b is not None:
+                        update_history(
+                            ds,
+                            f"Automatically generated cell boundaries for {self.method} regridding.",
+                        )
+                except Exception:
+                    pass
 
             has_bounds = lat_b is not None and lon_b is not None
 
             if self.method == "conservative" and not has_bounds:
-                # print(f"DEBUG: is_source={is_source}, ds={ds}")
-                # print(f"DEBUG: lat_b={lat_b}, lon_b={lon_b}")
                 raise ValueError(
                     f"Conservative regridding requires cell boundaries (bounds) for "
                     f"{'source' if is_source else 'target'} grid. "

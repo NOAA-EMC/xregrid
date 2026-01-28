@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 import xarray as xr
 
@@ -203,3 +203,107 @@ def plot_interactive(
             "Install it with `pip install hvplot`."
         )
     return da.hvplot(rasterize=rasterize, title=title, **kwargs)
+
+
+def plot_comparison(
+    da_src: xr.DataArray,
+    da_tgt: xr.DataArray,
+    projection: Any = None,
+    transform: Any = None,
+    cmap: str = "viridis",
+    diff_cmap: str = "RdBu_r",
+    title: Optional[str] = None,
+    **kwargs: Any,
+) -> Any:
+    """
+    Track A: Publication-quality comparison plot (Source, Target, Difference).
+
+    Parameters
+    ----------
+    da_src : xr.DataArray
+        The source DataArray.
+    da_tgt : xr.DataArray
+        The target (regridded) DataArray.
+    projection : cartopy.crs.Projection, optional
+        The projection for the axes.
+    transform : cartopy.crs.Projection, optional
+        The transform for the plot call.
+    cmap : str, default 'viridis'
+        Colormap for the data plots.
+    diff_cmap : str, default 'RdBu_r'
+        Colormap for the difference plot.
+    title : str, optional
+        Overall figure title.
+    **kwargs : Any
+        Additional arguments passed to plot_static.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The figure object.
+    """
+    if plt is None:
+        raise ImportError("Matplotlib is required for plot_comparison.")
+
+    if projection is None and ccrs is not None:
+        projection = ccrs.PlateCarree()
+
+    fig, axes = plt.subplots(
+        1,
+        3,
+        figsize=(18, 5),
+        subplot_kw={"projection": projection} if projection else None,
+    )
+
+    # 1. Source Plot
+    plot_static(
+        da_src,
+        ax=axes[0],
+        projection=projection,
+        transform=transform,
+        cmap=cmap,
+        title="Source Grid",
+        **kwargs,
+    )
+
+    # 2. Target Plot
+    plot_static(
+        da_tgt,
+        ax=axes[1],
+        projection=projection,
+        transform=transform,
+        cmap=cmap,
+        title="Target Grid",
+        **kwargs,
+    )
+
+    # 3. Difference Plot
+    # Interpolate source to target grid for difference calculation
+    try:
+        da_src_interp = da_src.interp_like(da_tgt, method="linear")
+        diff = da_tgt - da_src_interp
+        plot_static(
+            diff,
+            ax=axes[2],
+            projection=projection,
+            transform=transform,
+            cmap=diff_cmap,
+            title="Difference (Tgt - Src_interp)",
+            **kwargs,
+        )
+    except Exception as e:
+        axes[2].text(
+            0.5,
+            0.5,
+            f"Could not compute difference:\n{e}",
+            ha="center",
+            va="center",
+            transform=axes[2].transAxes,
+        )
+        axes[2].set_title("Difference")
+
+    if title:
+        fig.suptitle(title, fontsize=16)
+
+    plt.tight_layout()
+    return fig

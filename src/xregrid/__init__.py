@@ -5,13 +5,14 @@ from .utils import (
     create_regional_grid,
     load_esmf_file,
 )
-from .viz import plot_interactive, plot_static
+from .viz import plot_comparison, plot_interactive, plot_static
 from .xregrid import Regridder
 
 __all__ = [
     "Regridder",
     "plot_static",
     "plot_interactive",
+    "plot_comparison",
     "create_global_grid",
     "create_regional_grid",
     "create_grid_from_crs",
