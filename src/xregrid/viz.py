@@ -31,7 +31,7 @@ def plot_static(
     da: xr.DataArray,
     projection: Any = None,
     transform: Any = None,
-    title: str = "Static Map",
+    title: Optional[str] = None,
     **kwargs: Any,
 ) -> Any:
     """
@@ -167,6 +167,8 @@ def plot_static(
     if hasattr(ax, "coastlines"):
         ax.coastlines()
 
+    if title is None:
+        title = da.name if da.name else "Static Map"
     ax.set_title(title)
 
     return im

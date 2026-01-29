@@ -262,6 +262,69 @@ class Regridder:
         else:
             raise ValueError("Latitude and longitude must be 1D or 2D.")
 
+    def _bounds_to_vertices(self, b: xr.DataArray) -> np.ndarray:
+        """
+        Convert bounds to vertices for ESMF.
+
+        Handles 1D coordinates (N, 2) -> (N+1,) and 2D coordinates (Y, X, 4) -> (Y+1, X+1).
+
+        Parameters
+        ----------
+        b : xarray.DataArray
+            The bounds data array.
+
+        Returns
+        -------
+        np.ndarray
+            The vertex array.
+        """
+        if b.ndim == 2 and b.shape[-1] == 2:
+            # 1D coordinates: (N, 2) -> (N+1,)
+            # This assumes the bounds are contiguous
+            return np.concatenate([b.values[:, 0], b.values[-1:, 1]])
+        elif b.ndim == 3 and b.shape[-1] == 4:
+            # 2D coordinates: (Y, X, 4) -> (Y+1, X+1)
+            # Corners are ordered: 0=(y, x), 1=(y, x+1), 2=(y+1, x+1), 3=(y+1, x)
+            y_size, x_size, _ = b.shape
+            vals = b.values
+            res = np.empty((y_size + 1, x_size + 1))
+            res[:-1, :-1] = vals[:, :, 0]
+            res[:-1, -1] = vals[:, -1, 1]
+            res[-1, -1] = vals[-1, -1, 2]
+            res[-1, :-1] = vals[-1, :, 3]
+            return res
+        return b.values
+
+    def _get_grid_bounds(
+        self, ds: xr.Dataset
+    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        """
+        Extract grid cell boundaries from a dataset.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The dataset to extract bounds from.
+
+        Returns
+        -------
+        lat_b : np.ndarray or None
+            Latitude boundaries.
+        lon_b : np.ndarray or None
+            Longitude boundaries.
+        """
+        try:
+            lat_b_da = ds.cf.get_bounds("latitude")
+            lon_b_da = ds.cf.get_bounds("longitude")
+            return self._bounds_to_vertices(lat_b_da), self._bounds_to_vertices(lon_b_da)
+        except (KeyError, AttributeError, ValueError):
+            if "lat_b" in ds and "lon_b" in ds:
+                # Return as numpy if they are xarray objects
+                lat_b = ds["lat_b"].values if hasattr(ds["lat_b"], "values") else ds["lat_b"]
+                lon_b = ds["lon_b"].values if hasattr(ds["lon_b"], "values") else ds["lon_b"]
+                return lat_b, lon_b
+        return None, None
+
     def _create_esmf_object(
         self, ds: xr.Dataset, is_source: bool = True
     ) -> Union[esmpy.Grid, esmpy.LocStream]:
@@ -300,9 +363,6 @@ class Regridder:
                 )
 
             # ESMF requires numpy arrays for grid definition.
-            # While the Aero Protocol prioritizes laziness, the underlying ESMF C++ library
-            # requires concrete memory buffers for grid construction. We therefore
-            # compute coordinate values here if they are dask-backed.
             locstream = esmpy.LocStream(shape[0], coord_sys=esmpy.CoordSys.SPH_DEG)
             locstream["ESMF:Lon"] = lon.values.astype(np.float64)
             locstream["ESMF:Lat"] = lat.values.astype(np.float64)
@@ -319,50 +379,14 @@ class Regridder:
             periodic_dim = 0 if self.periodic else None
             pole_dim = 1 if self.periodic else None
 
-            def _bounds_to_vertices(b: xr.DataArray) -> np.ndarray:
-                """
-                Convert bounds to vertices for ESMF.
-
-                Handles 1D coordinates (N, 2) -> (N+1,) and 2D coordinates (Y, X, 4) -> (Y+1, X+1).
-                """
-                if b.ndim == 2 and b.shape[-1] == 2:
-                    # 1D coordinates: (N, 2) -> (N+1,)
-                    # This assumes the bounds are contiguous
-                    return np.concatenate([b.values[:, 0], b.values[-1:, 1]])
-                elif b.ndim == 3 and b.shape[-1] == 4:
-                    # 2D coordinates: (Y, X, 4) -> (Y+1, X+1)
-                    # Corners are ordered: 0=(y, x), 1=(y, x+1), 2=(y+1, x+1), 3=(y+1, x)
-                    y_size, x_size, _ = b.shape
-                    vals = b.values
-                    res = np.empty((y_size + 1, x_size + 1))
-                    res[:-1, :-1] = vals[:, :, 0]
-                    res[:-1, -1] = vals[:, -1, 1]
-                    res[-1, -1] = vals[-1, -1, 2]
-                    res[-1, :-1] = vals[-1, :, 3]
-                    return res
-                return b.values
-
-            # Attempt to find bounds using cf-xarray or standard names
-            lat_b = None
-            lon_b = None
-
-            def _get_bounds(dset):
-                try:
-                    lat_b_da = dset.cf.get_bounds("latitude")
-                    lon_b_da = dset.cf.get_bounds("longitude")
-                    return _bounds_to_vertices(lat_b_da), _bounds_to_vertices(lon_b_da)
-                except (KeyError, AttributeError, ValueError):
-                    if "lat_b" in dset and "lon_b" in dset:
-                        return dset["lat_b"], dset["lon_b"]
-                return None, None
-
-            lat_b, lon_b = _get_bounds(ds)
+            # Attempt to find bounds
+            lat_b, lon_b = self._get_grid_bounds(ds)
 
             if (lat_b is None or lon_b is None) and self.method == "conservative":
                 # Aero Protocol: Flexibility - Automatically try to generate bounds if missing
                 try:
                     ds_with_bounds = ds.cf.add_bounds(["latitude", "longitude"])
-                    lat_b, lon_b = _get_bounds(ds_with_bounds)
+                    lat_b, lon_b = self._get_grid_bounds(ds_with_bounds)
                     if lat_b is not None and lon_b is not None:
                         update_history(
                             ds,
@@ -399,14 +423,10 @@ class Regridder:
             grid_lat[...] = lat_f.astype(np.float64)
 
             if has_bounds:
-                # lat_b and lon_b are already set from above (as numpy arrays or DataArrays)
-                lat_b_val = lat_b.values if hasattr(lat_b, "values") else lat_b
-                lon_b_val = lon_b.values if hasattr(lon_b, "values") else lon_b
-
-                if lon_b_val.ndim == 1 and lat_b_val.ndim == 1:
-                    lon_b_vals, lat_b_vals = np.meshgrid(lon_b_val, lat_b_val)
+                if lon_b.ndim == 1 and lat_b.ndim == 1:
+                    lon_b_vals, lat_b_vals = np.meshgrid(lon_b, lat_b)
                 else:
-                    lon_b_vals, lat_b_vals = lon_b_val, lat_b_val
+                    lon_b_vals, lat_b_vals = lon_b, lat_b
 
                 grid_lon_b = grid.get_coords(0, staggerloc=esmpy.StaggerLoc.CORNER)
                 grid_lat_b = grid.get_coords(1, staggerloc=esmpy.StaggerLoc.CORNER)
@@ -666,21 +686,35 @@ class Regridder:
 
             if self.skipna:
                 mask = np.isnan(flat_data)
-                safe_data = np.where(mask, 0.0, flat_data)
-                # Optimized CSR application: (matrix @ data.T).T is faster than data @ matrix.T
-                result = (self._weights_matrix @ safe_data.T).T
-                weights_sum = (self._weights_matrix @ (~mask).astype(float).T).T
-                with np.errstate(divide="ignore", invalid="ignore"):
-                    final_result = result / weights_sum
+                has_nans = np.any(mask)
+
+                if not has_nans:
+                    # Fast path: No NaNs in this data block
+                    result = (self._weights_matrix @ flat_data.T).T
                     if self._total_weights is not None:
-                        fraction_valid = weights_sum / self._total_weights
-                        final_result = np.where(
-                            fraction_valid >= (1.0 - self.na_thres - 1e-6),
-                            final_result,
-                            np.nan,
-                        )
-                result = final_result
+                        with np.errstate(divide="ignore", invalid="ignore"):
+                            result = result / self._total_weights
+                else:
+                    # Slow path: Handle NaNs by re-normalizing weights
+                    safe_data = np.where(mask, 0.0, flat_data)
+                    # Optimized CSR application: (matrix @ data.T).T is faster than data @ matrix.T
+                    result = (self._weights_matrix @ safe_data.T).T
+                    # Sum weights of valid (non-NaN) points
+                    weights_sum = (
+                        self._weights_matrix @ (~mask).astype(np.float32).T
+                    ).T
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        final_result = result / weights_sum
+                        if self._total_weights is not None:
+                            fraction_valid = weights_sum / self._total_weights
+                            final_result = np.where(
+                                fraction_valid >= (1.0 - self.na_thres - 1e-6),
+                                final_result,
+                                np.nan,
+                            )
+                    result = final_result
             else:
+                # Standard path (skipna=False): Just apply weights
                 # Optimized CSR application: (matrix @ data.T).T is faster than data @ matrix.T
                 result = (self._weights_matrix @ flat_data.T).T
 
