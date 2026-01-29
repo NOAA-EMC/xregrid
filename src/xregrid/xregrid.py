@@ -20,6 +20,7 @@ from .utils import update_history
 if TYPE_CHECKING:
     pass
 
+
 # Helper function for Dask parallel execution
 def _compute_chunk_weights(
     source_ds: xr.Dataset,
@@ -52,7 +53,7 @@ def _compute_chunk_weights(
             mpi=False,
             extrap_method=extrap_method,
             extrap_dist_exponent=extrap_dist_exponent,
-            mask_var=mask_var
+            mask_var=mask_var,
         )
 
         # Extract weights
@@ -70,8 +71,13 @@ def _compute_chunk_weights(
 
     except Exception as e:
         import traceback
-        return np.array([]), np.array([]), np.array([]), f"{str(e)}\n{traceback.format_exc()}"
 
+        return (
+            np.array([]),
+            np.array([]),
+            np.array([]),
+            f"{str(e)}\n{traceback.format_exc()}",
+        )
 
 
 class Regridder:
@@ -115,7 +121,6 @@ class Regridder:
         mpi: bool = False,
         parallel: bool = False,
         compute: bool = True,
-
         extrap_method: Optional[str] = None,
         extrap_dist_exponent: float = 2.0,
     ) -> None:
@@ -165,16 +170,17 @@ class Regridder:
             )
 
         if mpi and parallel:
-            raise ValueError("Cannot use both MPI and Dask (parallel=True) simultaneously.")
+            raise ValueError(
+                "Cannot use both MPI and Dask (parallel=True) simultaneously."
+            )
 
         if parallel:
-             try:
-                 import dask.distributed
-             except ImportError:
-                 raise ImportError(
-                     "Dask distributed is required for parallel=True. "
-                     "Please install it via `pip install dask distributed`."
-                 )
+            import importlib.util
+            if importlib.util.find_spec("dask.distributed") is None:
+                raise ImportError(
+                    "Dask distributed is required for parallel=True. "
+                    "Please install it via `pip install dask distributed`."
+                )
 
         # Initialize ESMF Manager (required for some environments)
         if mpi:
@@ -320,8 +326,12 @@ class Regridder:
 
         if lat.ndim == 2:
             # Curvilinear
-            if lon.ndim == 2 and lon.dims != lat.dims and set(lon.dims) == set(lat.dims):
-                 lon = lon.transpose(*lat.dims)
+            if (
+                lon.ndim == 2
+                and lon.dims != lat.dims
+                and set(lon.dims) == set(lat.dims)
+            ):
+                lon = lon.transpose(*lat.dims)
             return lon, lat, lat.shape, lat.dims, False
         elif lat.ndim == 1:
             if lat.dims == lon.dims:
@@ -334,8 +344,8 @@ class Regridder:
                 # Ensure they have the correct order (lat, lon) for the shape
                 # Check if lon needs transpose to match lat's dimension order if both are 2D
                 if lat.ndim == 2 and lon.ndim == 2:
-                     if lat.dims != lon.dims and set(lat.dims) == set(lon.dims):
-                          lon = lon.transpose(*lat.dims)
+                    if lat.dims != lon.dims and set(lat.dims) == set(lon.dims):
+                        lon = lon.transpose(*lat.dims)
 
                 lon_mesh = lon_mesh.transpose(lat.dims[0], lon.dims[0])
                 lat_mesh = lat_mesh.transpose(lat.dims[0], lon.dims[0])
@@ -658,27 +668,33 @@ class Regridder:
 
         # Get grid info and populate internal state
         # Source
-        _, _, src_shape, src_dims, is_unstructured_src = self._get_mesh_info(self.source_grid_ds)
+        _, _, src_shape, src_dims, is_unstructured_src = self._get_mesh_info(
+            self.source_grid_ds
+        )
         self._shape_source = src_shape
         self._dims_source = src_dims
         self._is_unstructured_src = is_unstructured_src
 
         # Target
-        _, _, dst_shape, dst_dims, is_unstructured_dst = self._get_mesh_info(self.target_grid_ds)
+        _, _, dst_shape, dst_dims, is_unstructured_dst = self._get_mesh_info(
+            self.target_grid_ds
+        )
         self._shape_target = dst_shape
         self._dims_target = dst_dims
         self._is_unstructured_tgt = is_unstructured_dst
 
         if is_unstructured_dst:
-             raise NotImplementedError("Dask parallelization not yet optimized/verified for unstructured target grids.")
+            raise NotImplementedError(
+                "Dask parallelization not yet optimized/verified for unstructured target grids."
+            )
 
         # Get client
         try:
-             client = dask.distributed.get_client()
+            client = dask.distributed.get_client()
         except ValueError:
-             # Create a local cluster if none exists
-             cluster = dask.distributed.LocalCluster()
-             client = dask.distributed.Client(cluster)
+            # Create a local cluster if none exists
+            cluster = dask.distributed.LocalCluster()
+            client = dask.distributed.Client(cluster)
 
         self._dask_client = client
 
@@ -690,14 +706,14 @@ class Regridder:
         lats = self.target_grid_ds[dst_dims[0]].values
 
         if len(dst_dims) > 1:
-             lons = self.target_grid_ds[dst_dims[1]].values
-             n_cols = len(lons)
+            lons = self.target_grid_ds[dst_dims[1]].values
+            n_cols = len(lons)
         else:
-             # 1D case (unstructured or just simple 1D line)
-             n_cols = 1
+            # 1D case (unstructured or just simple 1D line)
+            n_cols = 1
 
         # Determine number of chunks. Use number of workers * 2 usually good heuristic
-        n_workers = len(client.scheduler_info()['workers'])
+        n_workers = len(client.scheduler_info()["workers"])
         n_chunks = n_workers * 2
 
         # Split the first dimension
@@ -716,9 +732,7 @@ class Regridder:
             chunk_size = len(lat_chunk) * n_cols
 
             # Construct block info to reconstruct coordinates on worker
-            block_info = {
-                dst_dims[0]: lat_chunk
-            }
+            block_info = {dst_dims[0]: lat_chunk}
             if len(dst_dims) > 1:
                 block_info[dst_dims[1]] = lons
 
@@ -730,7 +744,7 @@ class Regridder:
                 current_row_offset,
                 self.extrap_method,
                 self.extrap_dist_exponent,
-                self.mask_var
+                self.mask_var,
             )
             futures.append(future)
             current_row_offset += chunk_size
@@ -754,15 +768,14 @@ class Regridder:
             The regridder instance (self).
         """
         if not self.parallel:
-             return self
+            return self
 
         # If we later switch to dask.delayed, this would trigger client.compute(delayed_objs)
         if self._dask_futures is None and self._weights_matrix is None:
-             # This arguably shouldn't happen in current logic unless something failed
-             pass
+            # This arguably shouldn't happen in current logic unless something failed
+            pass
 
         return self
-
 
     def compute(self) -> None:
         """
@@ -772,10 +785,10 @@ class Regridder:
             return
 
         if not self._dask_futures:
-             # This means compute=False was not used, or something went wrong?
-             # Or maybe parallel=True but _generate_weights_dask wasn't called yet?
-             # But __init__ calls _generate_weights.
-             return
+            # This means compute=False was not used, or something went wrong?
+            # Or maybe parallel=True but _generate_weights_dask wasn't called yet?
+            # But __init__ calls _generate_weights.
+            return
 
         # Gather results
         results = self._dask_client.gather(self._dask_futures)
@@ -810,7 +823,6 @@ class Regridder:
 
         # Clear futures to free memory
         self._dask_futures = None
-
 
     def _save_weights(self) -> None:
         """Save weights to a NetCDF file."""
@@ -918,7 +930,7 @@ class Regridder:
             The regridded data.
         """
         if self.parallel and self._weights_matrix is None:
-             self.compute()
+            self.compute()
 
         if isinstance(obj, xr.Dataset):
             return self._regrid_dataset(obj)
