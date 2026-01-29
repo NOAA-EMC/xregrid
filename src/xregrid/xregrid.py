@@ -316,12 +316,22 @@ class Regridder:
         try:
             lat_b_da = ds.cf.get_bounds("latitude")
             lon_b_da = ds.cf.get_bounds("longitude")
-            return self._bounds_to_vertices(lat_b_da), self._bounds_to_vertices(lon_b_da)
+            return self._bounds_to_vertices(lat_b_da), self._bounds_to_vertices(
+                lon_b_da
+            )
         except (KeyError, AttributeError, ValueError):
             if "lat_b" in ds and "lon_b" in ds:
                 # Return as numpy if they are xarray objects
-                lat_b = ds["lat_b"].values if hasattr(ds["lat_b"], "values") else ds["lat_b"]
-                lon_b = ds["lon_b"].values if hasattr(ds["lon_b"], "values") else ds["lon_b"]
+                lat_b = (
+                    ds["lat_b"].values
+                    if hasattr(ds["lat_b"], "values")
+                    else ds["lat_b"]
+                )
+                lon_b = (
+                    ds["lon_b"].values
+                    if hasattr(ds["lon_b"], "values")
+                    else ds["lon_b"]
+                )
                 return lat_b, lon_b
         return None, None
 
