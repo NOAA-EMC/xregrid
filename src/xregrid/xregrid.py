@@ -16,8 +16,62 @@ except ImportError:
 
 from .utils import update_history
 
+
 if TYPE_CHECKING:
     pass
+
+# Helper function for Dask parallel execution
+def _compute_chunk_weights(
+    source_ds: xr.Dataset,
+    target_block_info: dict,
+    method: str,
+    row_offset: int,
+    extrap_method: Optional[str] = None,
+    extrap_dist_exponent: float = 2.0,
+    mask_var: Optional[str] = None,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[str]]:
+    """
+    Worker function to compute weights for a specific chunk of the target grid.
+
+    This function is executed on Dask workers. It creates a temporary
+    local Regridder (mpi=False) to process the chunk.
+    """
+    try:
+        # Reconstruct target chunk dataset from block info
+        coords = {}
+        for dim, values in target_block_info.items():
+            coords[dim] = values
+
+        chunk_ds = xr.Dataset(coords=coords)
+
+        # Initialize regridder in serial mode (mpi=False)
+        regridder = Regridder(
+            source_ds,
+            chunk_ds,
+            method=method,
+            mpi=False,
+            extrap_method=extrap_method,
+            extrap_dist_exponent=extrap_dist_exponent,
+            mask_var=mask_var
+        )
+
+        # Extract weights
+        if regridder._weights_matrix is None:
+            return np.array([]), np.array([]), np.array([]), "No weights generated"
+
+        matrix = regridder._weights_matrix.tocoo()
+
+        # Adjust row indices (destination indices) to match the global grid
+        rows = matrix.row + row_offset
+        cols = matrix.col
+        data = matrix.data
+
+        return rows, cols, data, None
+
+    except Exception as e:
+        import traceback
+        return np.array([]), np.array([]), np.array([]), f"{str(e)}\n{traceback.format_exc()}"
+
 
 
 class Regridder:
@@ -59,6 +113,9 @@ class Regridder:
         na_thres: float = 1.0,
         periodic: bool = False,
         mpi: bool = False,
+        parallel: bool = False,
+        compute: bool = True,
+
         extrap_method: Optional[str] = None,
         extrap_dist_exponent: float = 2.0,
     ) -> None:
@@ -88,6 +145,14 @@ class Regridder:
         mpi : bool, default False
             Whether to use MPI for parallel weight generation.
             Requires running with mpirun and having mpi4py installed for gathering.
+        parallel : bool, default False
+            Whether to use Dask for parallel weight generation.
+            Requires 'dask' and 'distributed' installed.
+            Cannot be True if mpi=True.
+        compute : bool, default True
+            If True, compute weights immediately when parallel=True.
+            If False, submitting tasks but delaying gathering until .compute() is called.
+            Only relevant if parallel=True.
         extrap_method : str, optional
             Extrapolation method (nearest_s2d, nearest_idw, creep_fill).
         extrap_dist_exponent : float, default 2.0
@@ -98,6 +163,18 @@ class Regridder:
                 "ESMPy is required for Regridder. "
                 "Please install it via conda: `conda install -c conda-forge esmpy`"
             )
+
+        if mpi and parallel:
+            raise ValueError("Cannot use both MPI and Dask (parallel=True) simultaneously.")
+
+        if parallel:
+             try:
+                 import dask.distributed
+             except ImportError:
+                 raise ImportError(
+                     "Dask distributed is required for parallel=True. "
+                     "Please install it via `pip install dask distributed`."
+                 )
 
         # Initialize ESMF Manager (required for some environments)
         if mpi:
@@ -113,6 +190,8 @@ class Regridder:
         self.skipna = skipna
         self.na_thres = na_thres
         self.periodic = periodic
+        self.parallel = parallel
+        self.compute_on_init = compute
         self.extrap_method = extrap_method
         self.extrap_dist_exponent = extrap_dist_exponent
 
@@ -143,6 +222,9 @@ class Regridder:
         self._loaded_periodic: Optional[bool] = None
         self._loaded_extrap: Optional[str] = None
         self.generation_time: Optional[float] = None
+        self._dask_futures: Optional[list] = None
+        self._dask_client: Optional[Any] = None
+        self._dask_start_time: Optional[float] = None
 
         if reuse_weights and os.path.exists(filename):
             self._load_weights()
@@ -469,6 +551,10 @@ class Regridder:
 
     def _generate_weights(self) -> None:
         """Generate regridding weights using ESMPy."""
+        if self.parallel:
+            self._generate_weights_dask(compute=self.compute_on_init)
+            return
+
         start_time = time.perf_counter()
         src_obj = self._create_esmf_object(self.source_grid_ds, is_source=True)
         dst_obj = self._create_esmf_object(self.target_grid_ds, is_source=False)
@@ -563,6 +649,168 @@ class Regridder:
             self._total_weights = np.ones((1, n_src)) @ self._weights_matrix.T
 
         self.generation_time = time.perf_counter() - start_time
+
+    def _generate_weights_dask(self, compute: bool = True) -> None:
+        """Generate regridding weights using Dask parallel workers."""
+        import dask.distributed
+
+        self._dask_start_time = time.perf_counter()
+
+        # Get grid info and populate internal state
+        # Source
+        _, _, src_shape, src_dims, is_unstructured_src = self._get_mesh_info(self.source_grid_ds)
+        self._shape_source = src_shape
+        self._dims_source = src_dims
+        self._is_unstructured_src = is_unstructured_src
+
+        # Target
+        _, _, dst_shape, dst_dims, is_unstructured_dst = self._get_mesh_info(self.target_grid_ds)
+        self._shape_target = dst_shape
+        self._dims_target = dst_dims
+        self._is_unstructured_tgt = is_unstructured_dst
+
+        if is_unstructured_dst:
+             raise NotImplementedError("Dask parallelization not yet optimized/verified for unstructured target grids.")
+
+        # Get client
+        try:
+             client = dask.distributed.get_client()
+        except ValueError:
+             # Create a local cluster if none exists
+             cluster = dask.distributed.LocalCluster()
+             client = dask.distributed.Client(cluster)
+
+        self._dask_client = client
+
+        # Split target grid
+        # We assume 1D or 2D rectilinear/curvilinear for now based on _get_mesh_info logic
+        # For simplicity in this first implementation, we split along the first dimension (usually lat)
+
+        # Extract coordinate arrays
+        lats = self.target_grid_ds[dst_dims[0]].values
+
+        if len(dst_dims) > 1:
+             lons = self.target_grid_ds[dst_dims[1]].values
+             n_cols = len(lons)
+        else:
+             # 1D case (unstructured or just simple 1D line)
+             n_cols = 1
+
+        # Determine number of chunks. Use number of workers * 2 usually good heuristic
+        n_workers = len(client.scheduler_info()['workers'])
+        n_chunks = n_workers * 2
+
+        # Split the first dimension
+        chunks = np.array_split(lats, n_chunks)
+
+        futures = []
+        current_row_offset = 0
+
+        # Scatter source dataset
+        src_ds_future = client.scatter(self.source_grid_ds, broadcast=True)
+
+        for lat_chunk in chunks:
+            if len(lat_chunk) == 0:
+                continue
+
+            chunk_size = len(lat_chunk) * n_cols
+
+            # Construct block info to reconstruct coordinates on worker
+            block_info = {
+                dst_dims[0]: lat_chunk
+            }
+            if len(dst_dims) > 1:
+                block_info[dst_dims[1]] = lons
+
+            future = client.submit(
+                _compute_chunk_weights,
+                src_ds_future,
+                block_info,
+                self.method,
+                current_row_offset,
+                self.extrap_method,
+                self.extrap_dist_exponent,
+                self.mask_var
+            )
+            futures.append(future)
+            current_row_offset += chunk_size
+
+        self._dask_futures = futures
+
+        if compute:
+            self.compute()
+
+    def persist(self) -> "Regridder":
+        """
+        Ensure tasks are submitted to the cluster.
+
+        Since this implementation uses eager task submission (Futures),
+        the tasks are already running or pending on the cluster.
+        This method returns self for API consistency with Dask.
+
+        Returns
+        -------
+        Regridder
+            The regridder instance (self).
+        """
+        if not self.parallel:
+             return self
+
+        # If we later switch to dask.delayed, this would trigger client.compute(delayed_objs)
+        if self._dask_futures is None and self._weights_matrix is None:
+             # This arguably shouldn't happen in current logic unless something failed
+             pass
+
+        return self
+
+
+    def compute(self) -> None:
+        """
+        Trigger computation of weights if using Dask and not yet computed.
+        """
+        if not self.parallel or self._weights_matrix is not None:
+            return
+
+        if not self._dask_futures:
+             # This means compute=False was not used, or something went wrong?
+             # Or maybe parallel=True but _generate_weights_dask wasn't called yet?
+             # But __init__ calls _generate_weights.
+             return
+
+        # Gather results
+        results = self._dask_client.gather(self._dask_futures)
+
+        all_rows = []
+        all_cols = []
+        all_data = []
+
+        for i, (r, c, d, err) in enumerate(results):
+            if err:
+                raise RuntimeError(f"Dask worker {i} failed: {err}")
+            all_rows.append(r)
+            all_cols.append(c)
+            all_data.append(d)
+
+        full_rows = np.concatenate(all_rows)
+        full_cols = np.concatenate(all_cols)
+        full_data = np.concatenate(all_data)
+
+        n_src = int(np.prod(self._shape_source))
+        n_dst = int(np.prod(self._shape_target))
+
+        self._weights_matrix = coo_matrix(
+            (full_data, (full_rows, full_cols)), shape=(n_dst, n_src)
+        ).tocsr()
+
+        if self.skipna:
+            self._total_weights = np.ones((1, n_src)) @ self._weights_matrix.T
+
+        if self._dask_start_time:
+            self.generation_time = time.perf_counter() - self._dask_start_time
+
+        # Clear futures to free memory
+        self._dask_futures = None
+
 
     def _save_weights(self) -> None:
         """Save weights to a NetCDF file."""
@@ -669,6 +917,9 @@ class Regridder:
         xarray.DataArray or xarray.Dataset
             The regridded data.
         """
+        if self.parallel and self._weights_matrix is None:
+             self.compute()
+
         if isinstance(obj, xr.Dataset):
             return self._regrid_dataset(obj)
         elif isinstance(obj, xr.DataArray):
