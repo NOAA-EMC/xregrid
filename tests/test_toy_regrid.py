@@ -45,12 +45,17 @@ def test_toy_regrid_global_05():
     # 7. Verify Dataset output
     assert isinstance(ds_regridded, xr.Dataset)
     assert "air" in ds_regridded.data_vars
-    assert ds_regridded.air.shape == (ds.time.size, expected_lat_size, expected_lon_size)
+    assert ds_regridded.air.shape == (
+        ds.time.size,
+        expected_lat_size,
+        expected_lon_size,
+    )
 
     # Verify provenance
     assert "history" in ds_regridded.attrs
     assert "Regridder" in ds_regridded.attrs["history"]
     assert "bilinear" in ds_regridded.attrs["history"]
+
 
 if __name__ == "__main__":
     pytest.main([__file__])
