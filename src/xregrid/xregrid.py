@@ -176,6 +176,7 @@ class Regridder:
 
         if parallel:
             import importlib.util
+
             if importlib.util.find_spec("dask.distributed") is None:
                 raise ImportError(
                     "Dask distributed is required for parallel=True. "
