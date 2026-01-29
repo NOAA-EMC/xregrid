@@ -172,6 +172,39 @@ def plot_static(
     return im
 
 
+def plot(
+    da: xr.DataArray,
+    mode: str = "static",
+    **kwargs: Any,
+) -> Any:
+    """
+    Unified entry point for xregrid plotting following the Two-Track Rule.
+
+    Parameters
+    ----------
+    da : xr.DataArray
+        The DataArray to plot.
+    mode : str, default 'static'
+        The plotting mode: 'static' (Track A: Publication) or
+        'interactive' (Track B: Exploration).
+    **kwargs : Any
+        Additional arguments passed to plot_static or plot_interactive.
+
+    Returns
+    -------
+    Any
+        The plot object (Matplotlib artist or HvPlot object).
+    """
+    if mode == "static":
+        return plot_static(da, **kwargs)
+    elif mode == "interactive":
+        return plot_interactive(da, **kwargs)
+    else:
+        raise ValueError(
+            f"Unknown plotting mode: '{mode}'. Must be 'static' or 'interactive'."
+        )
+
+
 def plot_interactive(
     da: xr.DataArray,
     rasterize: bool = True,
