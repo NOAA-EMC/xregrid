@@ -11,7 +11,7 @@ def setup_worker_mock():
     import sys
     import numpy as np
 
-    if 'esmpy' in sys.modules and not isinstance(sys.modules['esmpy'], MagicMock):
+    if "esmpy" in sys.modules and not isinstance(sys.modules["esmpy"], MagicMock):
         return
 
     mock_esmpy = MagicMock()
@@ -38,17 +38,18 @@ def setup_worker_mock():
             self.get_item = MagicMock()
             self.add_item = MagicMock()
             self.staggerloc = [0, 1]
+
     mock_esmpy.Grid = MockGrid
     mock_esmpy.Field.return_value = MagicMock()
     mock_regrid = MagicMock()
     mock_regrid.get_factors.return_value = (np.array([0]), np.array([0]))
     mock_regrid.get_weights_dict.return_value = {
-        'row_dst': np.array([1]),
-        'col_src': np.array([1]),
-        'weights': np.array([1.0]),
+        "row_dst": np.array([1]),
+        "col_src": np.array([1]),
+        "weights": np.array([1.0]),
     }
     mock_esmpy.Regrid.return_value = mock_regrid
-    sys.modules['esmpy'] = mock_esmpy
+    sys.modules["esmpy"] = mock_esmpy
 
 
 def test_dask_parallel_regridding():
@@ -153,27 +154,37 @@ def test_dask_parallel_regridding():
 if __name__ == "__main__":
     test_dask_parallel_regridding()
 
+
 def test_dask_curvilinear_parallel():
     """
     Test parallel regridding on curvilinear grids.
     """
     from xregrid import create_grid_from_crs
-    cluster = dask.distributed.LocalCluster(n_workers=2, threads_per_worker=1, processes=True)
+
+    cluster = dask.distributed.LocalCluster(
+        n_workers=2, threads_per_worker=1, processes=True
+    )
     client = dask.distributed.Client(cluster)
     client.run(setup_worker_mock)
 
     try:
         source_grid = create_grid_from_crs("EPSG:4326", (0, 10, 0, 10), 1)
-        target_grid = create_grid_from_crs("EPSG:3857", (0, 1000000, 0, 1000000), 100000)
+        target_grid = create_grid_from_crs(
+            "EPSG:3857", (0, 1000000, 0, 1000000), 100000
+        )
 
-        regridder = Regridder(source_grid, target_grid, method="bilinear", parallel=True)
+        regridder = Regridder(
+            source_grid, target_grid, method="bilinear", parallel=True
+        )
         assert regridder._weights_matrix is not None
 
-        data = xr.DataArray(np.random.rand(10, 10),
-                           coords={'y': source_grid.y, 'x': source_grid.x},
-                           dims=['y', 'x'])
-        data.coords['lat'] = source_grid.lat
-        data.coords['lon'] = source_grid.lon
+        data = xr.DataArray(
+            np.random.rand(10, 10),
+            coords={"y": source_grid.y, "x": source_grid.x},
+            dims=["y", "x"],
+        )
+        data.coords["lat"] = source_grid.lat
+        data.coords["lon"] = source_grid.lon
 
         res = regridder(data)
         assert res.shape == (10, 10)

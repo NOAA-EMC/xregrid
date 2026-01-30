@@ -28,7 +28,7 @@ _WORKER_CACHE: dict = {}
 def _get_mesh_info(
     ds: xr.Dataset,
 ) -> Tuple[xr.DataArray, xr.DataArray, Tuple[int, ...], Tuple[str, ...], bool]:
-    """ Detect grid type and extract coordinates and shape. """
+    """Detect grid type and extract coordinates and shape."""
     try:
         lat = ds.cf["latitude"]
         lon = ds.cf["longitude"]
@@ -44,11 +44,7 @@ def _get_mesh_info(
 
     if lat.ndim == 2:
         # Curvilinear
-        if (
-            lon.ndim == 2
-            and lon.dims != lat.dims
-            and set(lon.dims) == set(lat.dims)
-        ):
+        if lon.ndim == 2 and lon.dims != lat.dims and set(lon.dims) == set(lat.dims):
             lon = lon.transpose(*lat.dims)
         return lon, lat, lat.shape, lat.dims, False
     elif lat.ndim == 1:
@@ -79,7 +75,7 @@ def _get_mesh_info(
 
 
 def _bounds_to_vertices(b: xr.DataArray) -> np.ndarray:
-    """ Convert bounds to vertices for ESMF. """
+    """Convert bounds to vertices for ESMF."""
     if b.ndim == 2 and b.shape[-1] == 2:
         return np.concatenate([b.values[:, 0], b.values[-1:, 1]])
     elif b.ndim == 3 and b.shape[-1] == 4:
@@ -97,7 +93,7 @@ def _bounds_to_vertices(b: xr.DataArray) -> np.ndarray:
 def _get_grid_bounds(
     ds: xr.Dataset,
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-    """ Extract grid cell boundaries from a dataset. """
+    """Extract grid cell boundaries from a dataset."""
     try:
         lat_b_da = ds.cf.get_bounds("latitude")
         lon_b_da = ds.cf.get_bounds("longitude")
@@ -105,14 +101,10 @@ def _get_grid_bounds(
     except (KeyError, AttributeError, ValueError):
         if "lat_b" in ds and "lon_b" in ds:
             lat_b = (
-                ds["lat_b"].values
-                if hasattr(ds["lat_b"], "values")
-                else ds["lat_b"]
+                ds["lat_b"].values if hasattr(ds["lat_b"], "values") else ds["lat_b"]
             )
             lon_b = (
-                ds["lon_b"].values
-                if hasattr(ds["lon_b"], "values")
-                else ds["lon_b"]
+                ds["lon_b"].values if hasattr(ds["lon_b"], "values") else ds["lon_b"]
             )
             return lat_b, lon_b
     return None, None
@@ -124,8 +116,9 @@ def _create_esmf_grid(
     periodic: bool = False,
     mask_var: Optional[str] = None,
 ) -> Union[esmpy.Grid, esmpy.LocStream]:
-    """ Creates an ESMF Grid or LocStream. """
+    """Creates an ESMF Grid or LocStream."""
     import esmpy
+
     lon, lat, shape, dims, is_unstructured = _get_mesh_info(ds)
 
     if is_unstructured:
@@ -163,7 +156,7 @@ def _create_esmf_grid(
         has_bounds = lat_b is not None and lon_b is not None
         if method == "conservative" and not has_bounds:
             raise ValueError(
-                f"Conservative regridding requires cell boundaries (bounds). "
+                "Conservative regridding requires cell boundaries (bounds). "
                 "Ensure your dataset has 'lat_b' and 'lon_b' or CF-compliant bounds."
             )
 
@@ -180,8 +173,12 @@ def _create_esmf_grid(
             pole_dim=pole_dim,
         )
 
-        grid.get_coords(0, staggerloc=esmpy.StaggerLoc.CENTER)[...] = lon_f.astype(np.float64)
-        grid.get_coords(1, staggerloc=esmpy.StaggerLoc.CENTER)[...] = lat_f.astype(np.float64)
+        grid.get_coords(0, staggerloc=esmpy.StaggerLoc.CENTER)[...] = lon_f.astype(
+            np.float64
+        )
+        grid.get_coords(1, staggerloc=esmpy.StaggerLoc.CENTER)[...] = lat_f.astype(
+            np.float64
+        )
 
         if has_bounds:
             if lon_b.ndim == 1 and lat_b.ndim == 1:
@@ -196,14 +193,18 @@ def _create_esmf_grid(
                 lon_b_vals_f = lon_b_vals_f[:-1, :]
                 lat_b_vals_f = lat_b_vals_f[:-1, :]
 
-            grid.get_coords(0, staggerloc=esmpy.StaggerLoc.CORNER)[...] = lon_b_vals_f.astype(np.float64)
-            grid.get_coords(1, staggerloc=esmpy.StaggerLoc.CORNER)[...] = lat_b_vals_f.astype(np.float64)
+            grid.get_coords(0, staggerloc=esmpy.StaggerLoc.CORNER)[...] = (
+                lon_b_vals_f.astype(np.float64)
+            )
+            grid.get_coords(1, staggerloc=esmpy.StaggerLoc.CORNER)[...] = (
+                lat_b_vals_f.astype(np.float64)
+            )
 
         if mask_var and mask_var in ds:
             grid.add_item(esmpy.GridItem.MASK, staggerloc=esmpy.StaggerLoc.CENTER)
-            grid.get_item(
-                esmpy.GridItem.MASK, staggerloc=esmpy.StaggerLoc.CENTER
-            )[...] = ds[mask_var].values.T.astype(np.int32)
+            grid.get_item(esmpy.GridItem.MASK, staggerloc=esmpy.StaggerLoc.CENTER)[
+                ...
+            ] = ds[mask_var].values.T.astype(np.int32)
         return grid
 
 
@@ -222,7 +223,6 @@ def _compute_chunk_weights(
     Uses worker-local caching for source ESMF objects.
     """
     try:
-        import dask.distributed
         import esmpy
 
         # Initialize Manager if not already done in this process
@@ -280,8 +280,13 @@ def _compute_chunk_weights(
 
     except Exception as e:
         import traceback
-        return (np.array([]), np.array([]), np.array([]),
-                f"{str(e)}\n{traceback.format_exc()}")
+
+        return (
+            np.array([]),
+            np.array([]),
+            np.array([]),
+            f"{str(e)}\n{traceback.format_exc()}",
+        )
 
 
 class Regridder:
@@ -523,8 +528,10 @@ class Regridder:
             self._is_unstructured_tgt = is_unstructured
 
         return _create_esmf_grid(
-            ds, self.method, periodic=self.periodic if is_source else False,
-            mask_var=self.mask_var if is_source else None
+            ds,
+            self.method,
+            periodic=self.periodic if is_source else False,
+            mask_var=self.mask_var if is_source else None,
         )
 
     def _generate_weights(self) -> None:
@@ -719,8 +726,7 @@ class Regridder:
 
                 # Extract global indices for this chunk
                 chunk_global_indices = global_indices[
-                    idx0[0]:idx0[-1]+1,
-                    idx1[0]:idx1[-1]+1
+                    idx0[0] : idx0[-1] + 1, idx1[0] : idx1[-1] + 1
                 ].flatten()
 
                 future = client.submit(
