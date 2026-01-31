@@ -32,7 +32,7 @@ def test_auto_bounds_conservative_numpy_dask():
 
     assert isinstance(res_lazy.data, da.Array)
     xr.testing.assert_allclose(res_eager, res_lazy.compute())
-    assert "Automatically generated" in ds_src.attrs["history"]
+    assert "Automatically generated" in res_eager.attrs["history"]
 
 
 def test_plot_comparison_smoke():

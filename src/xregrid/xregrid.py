@@ -1138,6 +1138,80 @@ class Regridder:
         if self.skipna:
             self._total_weights = np.ones((1, n_src)) @ self._weights_matrix.T
 
+    def quality_report(self) -> dict[str, Any]:
+        """
+        Generate a scientific quality report of the regridding weights.
+
+        Returns
+        -------
+        dict
+            Dictionary containing quality metrics:
+            - unmapped_count: Number of destination points with no weights.
+            - unmapped_fraction: Fraction of unmapped destination points.
+            - weight_sum_min: Minimum sum of weights across destination points.
+            - weight_sum_max: Maximum sum of weights across destination points.
+            - weight_sum_mean: Mean sum of weights across destination points.
+            - n_src: Number of source points.
+            - n_dst: Number of destination points.
+            - n_weights: Total number of non-zero weights.
+        """
+        if self._weights_matrix is None:
+            raise RuntimeError("Weights have not been generated yet.")
+
+        n_dst, n_src = self._weights_matrix.shape
+        # Sum weights for each destination row
+        weights_sum = np.array(self._weights_matrix.sum(axis=1)).flatten()
+
+        unmapped = weights_sum == 0
+        unmapped_count = int(np.sum(unmapped))
+
+        report = {
+            "unmapped_count": unmapped_count,
+            "unmapped_fraction": float(unmapped_count / n_dst),
+            "weight_sum_min": float(np.min(weights_sum[~unmapped]))
+            if unmapped_count < n_dst
+            else 0.0,
+            "weight_sum_max": float(np.max(weights_sum)),
+            "weight_sum_mean": float(np.mean(weights_sum)),
+            "n_src": n_src,
+            "n_dst": n_dst,
+            "n_weights": int(self._weights_matrix.nnz),
+            "method": self.method,
+            "periodic": self.periodic,
+        }
+        return report
+
+    def weights_to_xarray(self) -> xr.Dataset:
+        """
+        Export regridding weights and metadata as an xarray Dataset.
+
+        Returns
+        -------
+        xr.Dataset
+            Dataset containing 'row', 'col', and 'S' (weights).
+        """
+        if self._weights_matrix is None:
+            raise RuntimeError("Weights have not been generated yet.")
+
+        weights_coo = self._weights_matrix.tocoo()
+        ds = xr.Dataset(
+            data_vars={
+                "row": (["n_s"], weights_coo.row + 1),
+                "col": (["n_s"], weights_coo.col + 1),
+                "S": (["n_s"], weights_coo.data),
+            },
+            attrs={
+                "n_src": self._weights_matrix.shape[1],
+                "n_dst": self._weights_matrix.shape[0],
+                "shape_src": list(self._shape_source) if self._shape_source else [],
+                "shape_dst": list(self._shape_target) if self._shape_target else [],
+                "method": self.method,
+                "periodic": int(self.periodic),
+                "provenance": "; ".join(self.provenance),
+            },
+        )
+        return ds
+
     def __repr__(self) -> str:
         """
         String representation of the Regridder.
@@ -1147,11 +1221,18 @@ class Regridder:
         str
             Summary of the regridder configuration.
         """
+        try:
+            report = self.quality_report()
+            quality_str = f"unmapped={report['unmapped_fraction']:.2%}"
+        except Exception:
+            quality_str = "quality=unknown"
+
         return (
             f"Regridder(method={self.method}, "
             f"src_shape={self._shape_source}, "
             f"dst_shape={self._shape_target}, "
-            f"periodic={self.periodic})"
+            f"periodic={self.periodic}, "
+            f"{quality_str})"
         )
 
     def __call__(
@@ -1203,17 +1284,26 @@ class Regridder:
         temp_output_core_dims = [f"{d}_regridded" for d in self._dims_target]
 
         weights_arg = self._weights_matrix
-        if self.parallel and self._dask_client:
-            # Optimization: Use worker-local cache for weights to avoid serialization overhead
-            weights_key = f"weights_{id(self._weights_matrix)}"
-            if weights_key not in _WORKER_CACHE:
-                # We can't easily check worker cache from client, so we just run it
-                # client.run ensures it's on all CURRENT workers.
-                self._dask_client.run(
-                    _setup_worker_cache, weights_key, self._weights_matrix
-                )
-                _WORKER_CACHE[weights_key] = self._weights_matrix  # Also cache locally
-            weights_arg = weights_key
+
+        # Optimization: Use worker-local cache for weights to avoid serialization overhead
+        # when using Dask. Automatically detect if a client is active for Dask-backed data.
+        if hasattr(da_in.data, "dask"):
+            client = self._dask_client
+            if client is None:
+                try:
+                    import dask.distributed
+
+                    client = dask.distributed.get_client()
+                except (ImportError, ValueError):
+                    client = None
+
+            if client is not None:
+                weights_key = f"weights_{id(self._weights_matrix)}"
+                if weights_key not in _WORKER_CACHE:
+                    # client.run ensures it's on all CURRENT workers.
+                    client.run(_setup_worker_cache, weights_key, self._weights_matrix)
+                    _WORKER_CACHE[weights_key] = self._weights_matrix  # Also cache locally
+                weights_arg = weights_key
 
         # Use allow_rechunk=True to support chunked core dimensions
         # and move output_sizes to dask_gufunc_kwargs for future compatibility
