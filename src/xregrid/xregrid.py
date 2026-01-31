@@ -21,8 +21,14 @@ if TYPE_CHECKING:
     pass
 
 
-# Global cache for workers to reuse ESMF source objects
+# Global cache for workers to reuse ESMF source objects and weight matrices
 _WORKER_CACHE: dict = {}
+
+
+def _setup_worker_cache(key: str, value: Any) -> None:
+    """Setup a value in the worker-local cache."""
+    global _WORKER_CACHE
+    _WORKER_CACHE[key] = value
 
 
 def _get_mesh_info(
@@ -55,11 +61,9 @@ def _get_mesh_info(
             # Rectilinear
             lon_mesh, lat_mesh = xr.broadcast(lon, lat)
 
-            # Ensure they have the correct order (lat, lon) for the shape
-            if lat.ndim == 2 and lon.ndim == 2:
-                if lat.dims != lon.dims and set(lat.dims) == set(lon.dims):
-                    lon = lon.transpose(*lat.dims)
-
+            # Transpose to standard (lat, lon) order if needed
+            # For 1D lat/lon, they are broadcasted to (lat, lon) or (lon, lat)
+            # based on order in xr.broadcast. We enforce (lat, lon) here.
             lon_mesh = lon_mesh.transpose(lat.dims[0], lon.dims[0])
             lat_mesh = lat_mesh.transpose(lat.dims[0], lon.dims[0])
 
@@ -305,8 +309,8 @@ def _apply_weights_core(
     ----------
     data_block : np.ndarray
         The input data block. Core dimensions must be at the end.
-    weights_matrix : scipy.sparse.csr_matrix
-        The sparse weight matrix.
+    weights_matrix : scipy.sparse.csr_matrix or str
+        The sparse weight matrix or a string key for worker-local cache.
     dims_source : tuple of str
         The names of the source spatial dimensions.
     shape_target : tuple of int
@@ -323,6 +327,14 @@ def _apply_weights_core(
     np.ndarray
         The regridded data block.
     """
+    # Worker-local cache retrieval
+    if isinstance(weights_matrix, str):
+        if weights_matrix not in _WORKER_CACHE:
+            raise RuntimeError(
+                f"Weights key '{weights_matrix}' not found in worker cache."
+            )
+        weights_matrix = _WORKER_CACHE[weights_matrix]
+
     original_shape = data_block.shape
     # Core dimensions are at the end
     n_source_dims = len(dims_source)
@@ -339,7 +351,11 @@ def _apply_weights_core(
         if not has_nans:
             # Fast path: No NaNs in this data block
             # Optimized CSR application: (matrix @ data.T).T is faster than data @ matrix.T
-            result = (weights_matrix @ flat_data.T).T
+            result = (
+                (weights_matrix @ flat_data.T).get().T
+                if hasattr(weights_matrix, "get")
+                else (weights_matrix @ flat_data.T).T
+            )
             if total_weights is not None:
                 with np.errstate(divide="ignore", invalid="ignore"):
                     result = result / total_weights
@@ -1034,6 +1050,19 @@ class Regridder:
         input_core_dims = list(self._dims_source)
         temp_output_core_dims = [f"{d}_regridded" for d in self._dims_target]
 
+        weights_arg = self._weights_matrix
+        if self.parallel and self._dask_client:
+            # Optimization: Use worker-local cache for weights to avoid serialization overhead
+            weights_key = f"weights_{id(self._weights_matrix)}"
+            if weights_key not in _WORKER_CACHE:
+                # We can't easily check worker cache from client, so we just run it
+                # client.run ensures it's on all CURRENT workers.
+                self._dask_client.run(
+                    _setup_worker_cache, weights_key, self._weights_matrix
+                )
+                _WORKER_CACHE[weights_key] = self._weights_matrix  # Also cache locally
+            weights_arg = weights_key
+
         # Use allow_rechunk=True to support chunked core dimensions
         # and move output_sizes to dask_gufunc_kwargs for future compatibility
         # vectorize=False because _apply_weights_core handles non-core dimensions
@@ -1041,7 +1070,7 @@ class Regridder:
             _apply_weights_core,
             da_in,
             kwargs={
-                "weights_matrix": self._weights_matrix,
+                "weights_matrix": weights_arg,
                 "dims_source": self._dims_source,
                 "shape_target": self._shape_target,
                 "skipna": self.skipna,
