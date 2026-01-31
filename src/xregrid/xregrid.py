@@ -465,12 +465,14 @@ def _apply_weights_core(
         The regridded data block.
     """
     # Worker-local cache retrieval
+    weights_matrix_key = None
     if isinstance(weights_matrix, str):
-        if weights_matrix not in _WORKER_CACHE:
+        weights_matrix_key = weights_matrix
+        if weights_matrix_key not in _WORKER_CACHE:
             raise RuntimeError(
-                f"Weights key '{weights_matrix}' not found in worker cache."
+                f"Weights key '{weights_matrix_key}' not found in worker cache."
             )
-        weights_matrix = _WORKER_CACHE[weights_matrix]
+        weights_matrix = _WORKER_CACHE[weights_matrix_key]
 
     original_shape = data_block.shape
     # Core dimensions are at the end
@@ -498,24 +500,56 @@ def _apply_weights_core(
                     result /= total_weights
         else:
             # Slow path: Handle NaNs by re-normalizing weights
-            # Optimization: Use the input dtype for safe_data to avoid float64 promotion
-            zero = flat_data.dtype.type(0)
-            safe_data = np.where(mask, zero, flat_data)
-            result = _matmul(weights_matrix, safe_data)
 
             # Optimization: Check if the NaN mask is constant across non-spatial dimensions
             # Extremely common for fixed land/sea masks in geospatial data.
-            is_mask_stationary = False
+            is_mask_stationary = True
             if n_other > 1:
-                # Comparison of all masks against the first one. Fast for boolean arrays.
-                if np.all(mask == mask[0:1]):
-                    is_mask_stationary = True
+                # Comparison of all masks against the first one.
+                # Optimization: To avoid creating a massive (n_other, n_spatial) comparison array
+                # which could OOM for ~1km grids, we check slice by slice.
+                mask0 = mask[0:1]
+                for i in range(1, n_other):
+                    if not np.array_equal(mask[i : i + 1], mask0):
+                        is_mask_stationary = False
+                        break
+
+            # Optimization: Use the input dtype for safe_data to avoid float64 promotion
+            zero = flat_data.dtype.type(0)
+            if is_mask_stationary:
+                # Memory win: Use broadcasting for the stationary mask in np.where
+                # and explicitly keep only the first slice of the mask to free up memory.
+                mask0 = mask[0:1].copy()
+                mask = mask0  # Replace full mask with the single slice
+                safe_data = np.where(mask, zero, flat_data)
+            else:
+                safe_data = np.where(mask, zero, flat_data)
+
+            result = _matmul(weights_matrix, safe_data)
 
             if is_mask_stationary:
-                # Compute normalization only for the first (representative) mask
-                # Use float32 for normalization weights to save memory on large grids
-                valid_mask_single = np.logical_not(mask[0:1]).astype(np.float32)
-                weights_sum = _matmul(weights_matrix, valid_mask_single)
+                # Optimization: Cache the stationary weights_sum to avoid redundant sparse matmuls
+                # across multiple Dask chunks (e.g. different time segments).
+                weights_sum = None
+                if weights_matrix_key:
+                    ws_cache_key = f"ws_{weights_matrix_key}"
+                    mask_cache_key = f"mask_{weights_matrix_key}"
+
+                    if ws_cache_key in _WORKER_CACHE:
+                        # Validate that the mask is identical to the cached one
+                        cached_mask = _WORKER_CACHE.get(mask_cache_key)
+                        if np.array_equal(mask[0:1], cached_mask):
+                            weights_sum = _WORKER_CACHE[ws_cache_key]
+
+                if weights_sum is None:
+                    # Compute normalization only for the first (representative) mask
+                    # Use float32 for normalization weights to save memory on large grids
+                    valid_mask_single = np.logical_not(mask[0:1]).astype(np.float32)
+                    weights_sum = _matmul(weights_matrix, valid_mask_single)
+
+                    if weights_matrix_key:
+                        _WORKER_CACHE[ws_cache_key] = weights_sum
+                        _WORKER_CACHE[mask_cache_key] = mask[0:1].copy()
             else:
                 # Sum weights of valid (non-NaN) points for each slice
                 # We use float32 to keep peak memory down for ~1km grids
@@ -1379,8 +1413,20 @@ class Regridder:
             if client is not None:
                 weights_key = f"weights_{id(self._weights_matrix)}"
                 if weights_key not in _WORKER_CACHE:
-                    # client.run ensures it's on all CURRENT workers.
-                    client.run(_setup_worker_cache, weights_key, self._weights_matrix)
+                    # Optimization: Use scatter for more efficient distribution of large objects.
+                    # This avoids the overhead of sending the large matrix in a blocking client.run call.
+                    # We scatter to all workers and then register the key.
+                    # We use client.map to ensure futures are resolved before registration.
+                    future = client.scatter(self._weights_matrix, broadcast=True)
+                    workers = list(client.scheduler_info()["workers"].keys())
+                    client.gather(
+                        client.map(
+                            _setup_worker_cache,
+                            [weights_key] * len(workers),
+                            [future] * len(workers),
+                            workers=workers,
+                        )
+                    )
                     _WORKER_CACHE[weights_key] = (
                         self._weights_matrix
                     )  # Also cache locally
