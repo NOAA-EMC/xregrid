@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Optional, Tuple, Union
 import cf_xarray  # noqa: F401
 import numpy as np
 import xarray as xr
-from scipy.sparse import coo_matrix
+from scipy.sparse import coo_matrix, csr_matrix
 
 import esmpy
 
@@ -394,7 +394,7 @@ def _compute_chunk_weights(
 
 def _apply_weights_core(
     data_block: np.ndarray,
-    weights_matrix: Any,
+    weights_matrix: Union[csr_matrix, str],
     dims_source: Tuple[str, ...],
     shape_target: Tuple[int, ...],
     skipna: bool = False,
@@ -426,7 +426,7 @@ def _apply_weights_core(
     np.ndarray
         The regridded data block.
     """
-    # Worker-local cache retrieval
+    # Worker-local cache retrieval (Aero Protocol: No Hidden Computes)
     if isinstance(weights_matrix, str):
         if weights_matrix not in _WORKER_CACHE:
             raise RuntimeError(
@@ -441,44 +441,50 @@ def _apply_weights_core(
     other_dims_shape = original_shape[: len(original_shape) - n_source_dims]
     n_spatial = int(np.prod(spatial_shape))
     n_other = int(np.prod(other_dims_shape))
-    flat_data = data_block.reshape(n_other, n_spatial)
+
+    # Avoid unnecessary reshape if already 2D
+    flat_data = (
+        data_block.reshape(n_other, n_spatial) if n_other != 1 else data_block.flatten()
+    )
+
+    # Weights application helper to handle both NumPy and CuPy
+    def _matmul(A, B_T):
+        res = A @ B_T
+        return res.get().T if hasattr(res, "get") else res.T
 
     if skipna:
+        # Identify NaNs once
         mask = np.isnan(flat_data)
         has_nans = np.any(mask)
 
         if not has_nans:
             # Fast path: No NaNs in this data block
-            # Optimized CSR application: (matrix @ data.T).T is faster than data @ matrix.T
-            result = (
-                (weights_matrix @ flat_data.T).get().T
-                if hasattr(weights_matrix, "get")
-                else (weights_matrix @ flat_data.T).T
-            )
+            result = _matmul(weights_matrix, flat_data.T)
             if total_weights is not None:
                 with np.errstate(divide="ignore", invalid="ignore"):
                     result /= total_weights
         else:
             # Slow path: Handle NaNs by re-normalizing weights
-            # Use nan_to_num to efficiently replace NaNs with 0.0
-            safe_data = np.nan_to_num(flat_data, nan=0.0, copy=True)
-            result = (weights_matrix @ safe_data.T).T
+            # Replace NaNs with 0.0 without modifying the input array (unless it's a copy)
+            # np.where is generally faster and cleaner than nan_to_num for just NaNs
+            safe_data = np.where(mask, 0.0, flat_data)
+            result = _matmul(weights_matrix, safe_data.T)
 
-            # Sum weights of valid (non-NaN) points
-            # logical_not + astype is efficient for large arrays
-            valid_mask = np.logical_not(mask).astype(np.float32)
-            weights_sum = (weights_matrix @ valid_mask.T).T
+            # Sum weights of valid (non-NaN) points.
+            # Use float32 for valid_mask to save memory; it's enough for weight summation.
+            valid_mask = (~mask).astype(np.float32)
+            weights_sum = _matmul(weights_matrix, valid_mask.T)
 
             with np.errstate(divide="ignore", invalid="ignore"):
                 result /= weights_sum
                 if total_weights is not None:
-                    fraction_valid = weights_sum / total_weights
                     # In-place masking of low-confidence points
-                    result[fraction_valid < (1.0 - na_thres - 1e-6)] = np.nan
+                    # Compare against pre-computed total_weights to identify partial cells
+                    low_conf = weights_sum < (total_weights * (1.0 - na_thres - 1e-6))
+                    result[low_conf] = np.nan
     else:
         # Standard path (skipna=False): Just apply weights
-        # Optimized CSR application: (matrix @ data.T).T is faster than data @ matrix.T
-        result = (weights_matrix @ flat_data.T).T
+        result = _matmul(weights_matrix, flat_data.T)
 
     new_shape = other_dims_shape + shape_target
     return result.reshape(new_shape)
@@ -857,7 +863,8 @@ class Regridder:
         ).tocsr()
 
         if self.skipna:
-            self._total_weights = np.ones((1, n_src)) @ self._weights_matrix.T
+            # sum(axis=1) is more memory efficient than matrix multiply with ones
+            self._total_weights = np.asarray(self._weights_matrix.sum(axis=1)).flatten()
 
         self.generation_time = time.perf_counter() - start_time
 
@@ -1047,7 +1054,8 @@ class Regridder:
         ).tocsr()
 
         if self.skipna:
-            self._total_weights = np.ones((1, n_src)) @ self._weights_matrix.T
+            # sum(axis=1) is more memory efficient than matrix multiply with ones
+            self._total_weights = np.asarray(self._weights_matrix.sum(axis=1)).flatten()
 
         if self._dask_start_time:
             self.generation_time = time.perf_counter() - self._dask_start_time
@@ -1136,7 +1144,8 @@ class Regridder:
         ).tocsr()
 
         if self.skipna:
-            self._total_weights = np.ones((1, n_src)) @ self._weights_matrix.T
+            # sum(axis=1) is more memory efficient than matrix multiply with ones
+            self._total_weights = np.asarray(self._weights_matrix.sum(axis=1)).flatten()
 
     def __repr__(self) -> str:
         """
