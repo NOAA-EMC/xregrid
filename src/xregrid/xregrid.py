@@ -392,6 +392,30 @@ def _compute_chunk_weights(
         )
 
 
+def _matmul(matrix: Any, data: np.ndarray) -> np.ndarray:
+    """
+    Backend-agnostic matrix multiplication (matrix @ data.T).T.
+
+    Handles both NumPy and CuPy backends and ensures a NumPy array is returned.
+
+    Parameters
+    ----------
+    matrix : Any
+        The sparse weight matrix.
+    data : np.ndarray
+        The dense data array (2D: other x spatial).
+
+    Returns
+    -------
+    np.ndarray
+        The result of (matrix @ data.T).T as a NumPy array.
+    """
+    res = (matrix @ data.T).T
+    if hasattr(res, "get"):
+        return res.get()
+    return res
+
+
 def _apply_weights_core(
     data_block: np.ndarray,
     weights_matrix: Any,
@@ -441,7 +465,12 @@ def _apply_weights_core(
     other_dims_shape = original_shape[: len(original_shape) - n_source_dims]
     n_spatial = int(np.prod(spatial_shape))
     n_other = int(np.prod(other_dims_shape))
-    flat_data = data_block.reshape(n_other, n_spatial)
+
+    # Optimization: avoid reshape if already 2D and spatial is flat
+    if len(original_shape) == 2 and n_other == original_shape[0]:
+        flat_data = data_block
+    else:
+        flat_data = data_block.reshape(n_other, n_spatial)
 
     if skipna:
         mask = np.isnan(flat_data)
@@ -449,23 +478,18 @@ def _apply_weights_core(
 
         if not has_nans:
             # Fast path: No NaNs in this data block
-            # Optimized CSR application: (matrix @ data.T).T is faster than data @ matrix.T
-            result = (
-                (weights_matrix @ flat_data.T).get().T
-                if hasattr(weights_matrix, "get")
-                else (weights_matrix @ flat_data.T).T
-            )
+            result = _matmul(weights_matrix, flat_data)
             if total_weights is not None:
                 with np.errstate(divide="ignore", invalid="ignore"):
                     result /= total_weights
         else:
             # Slow path: Handle NaNs by re-normalizing weights
-            # Use nan_to_num to efficiently replace NaNs with 0.0
-            safe_data = np.nan_to_num(flat_data, nan=0.0, copy=True)
-            result = (weights_matrix @ safe_data.T).T
+            # Optimization: Use np.where to create zeroed array instead of nan_to_num(copy=True)
+            # and specify dtype to potentially save memory if input is float32
+            safe_data = np.where(mask, 0.0, flat_data).astype(flat_data.dtype)
+            result = _matmul(weights_matrix, safe_data)
 
             # Optimization: Check if the NaN mask is constant across non-spatial dimensions
-            # If it is, we only need to compute weights_sum once.
             is_mask_stationary = False
             if n_other > 1:
                 # Comparison of all masks against the first one
@@ -474,30 +498,28 @@ def _apply_weights_core(
 
             if is_mask_stationary:
                 # Compute normalization only for the first (representative) mask
+                # Use float32 for normalization weights to save memory on large grids
                 valid_mask_single = np.logical_not(mask[0]).astype(np.float32)
-                weights_sum = (weights_matrix @ valid_mask_single).T
+                weights_sum = _matmul(weights_matrix, valid_mask_single[np.newaxis, :])
             else:
                 # Sum weights of valid (non-NaN) points for each slice
-                # logical_not + astype is efficient for large arrays
                 valid_mask = np.logical_not(mask).astype(np.float32)
-                weights_sum = (weights_matrix @ valid_mask.T).T
+                weights_sum = _matmul(weights_matrix, valid_mask)
 
             with np.errstate(divide="ignore", invalid="ignore"):
                 result /= weights_sum
                 if total_weights is not None:
                     fraction_valid = weights_sum / total_weights
                     # Masking of low-confidence points
-                    # Use np.where for robust broadcasting across optimized/non-optimized paths
                     result = np.where(
                         fraction_valid < (1.0 - na_thres - 1e-6), np.nan, result
                     )
     else:
         # Standard path (skipna=False): Just apply weights
-        # Optimized CSR application: (matrix @ data.T).T is faster than data @ matrix.T
-        result = (weights_matrix @ flat_data.T).T
+        result = _matmul(weights_matrix, flat_data)
 
     new_shape = other_dims_shape + shape_target
-    return result.reshape(new_shape)
+    return result.reshape(new_shape).astype(data_block.dtype, copy=False)
 
 
 class Regridder:
@@ -873,7 +895,8 @@ class Regridder:
         ).tocsr()
 
         if self.skipna:
-            self._total_weights = np.ones((1, n_src)) @ self._weights_matrix.T
+            # Optimization: Use sum(axis=1) instead of memory-intensive ones multiplication
+            self._total_weights = np.array(self._weights_matrix.sum(axis=1)).T
 
         self.generation_time = time.perf_counter() - start_time
 
@@ -1063,7 +1086,8 @@ class Regridder:
         ).tocsr()
 
         if self.skipna:
-            self._total_weights = np.ones((1, n_src)) @ self._weights_matrix.T
+            # Optimization: Use sum(axis=1) instead of memory-intensive ones multiplication
+            self._total_weights = np.array(self._weights_matrix.sum(axis=1)).T
 
         if self._dask_start_time:
             self.generation_time = time.perf_counter() - self._dask_start_time
@@ -1152,7 +1176,8 @@ class Regridder:
         ).tocsr()
 
         if self.skipna:
-            self._total_weights = np.ones((1, n_src)) @ self._weights_matrix.T
+            # Optimization: Use sum(axis=1) instead of memory-intensive ones multiplication
+            self._total_weights = np.array(self._weights_matrix.sum(axis=1)).T
 
     def quality_report(self) -> dict[str, Any]:
         """
@@ -1237,11 +1262,16 @@ class Regridder:
         str
             Summary of the regridder configuration.
         """
-        try:
-            report = self.quality_report()
-            quality_str = f"unmapped={report['unmapped_fraction']:.2%}"
-        except Exception:
-            quality_str = "quality=unknown"
+        quality_str = "quality=deferred"
+        n_dst = np.prod(self._shape_target) if self._shape_target else 0
+
+        # Optimization: Avoid expensive quality report for massive grids
+        if n_dst > 0 and n_dst < 1_000_000:
+            try:
+                report = self.quality_report()
+                quality_str = f"unmapped={report['unmapped_fraction']:.2%}"
+            except Exception:
+                quality_str = "quality=unknown"
 
         return (
             f"Regridder(method={self.method}, "
