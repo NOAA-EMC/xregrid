@@ -1302,7 +1302,9 @@ class Regridder:
                 if weights_key not in _WORKER_CACHE:
                     # client.run ensures it's on all CURRENT workers.
                     client.run(_setup_worker_cache, weights_key, self._weights_matrix)
-                    _WORKER_CACHE[weights_key] = self._weights_matrix  # Also cache locally
+                    _WORKER_CACHE[weights_key] = (
+                        self._weights_matrix
+                    )  # Also cache locally
                 weights_arg = weights_key
 
         # Use allow_rechunk=True to support chunked core dimensions
