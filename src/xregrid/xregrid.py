@@ -474,6 +474,14 @@ def _apply_weights_core(
             )
         weights_matrix = _WORKER_CACHE[weights_matrix_key]
 
+    if isinstance(total_weights, str):
+        total_weights_key = total_weights
+        if total_weights_key not in _WORKER_CACHE:
+            raise RuntimeError(
+                f"Total weights key '{total_weights_key}' not found in worker cache."
+            )
+        total_weights = _WORKER_CACHE[total_weights_key]
+
     original_shape = data_block.shape
     # Core dimensions are at the end
     n_source_dims = len(dims_source)
@@ -1397,9 +1405,11 @@ class Regridder:
         temp_output_core_dims = [f"{d}_regridded" for d in self._dims_target]
 
         weights_arg = self._weights_matrix
+        total_weights_arg = self._total_weights
 
-        # Optimization: Use worker-local cache for weights to avoid serialization overhead
-        # when using Dask. Automatically detect if a client is active for Dask-backed data.
+        # Optimization: Use worker-local cache for weights and total_weights to avoid
+        # serialization overhead when using Dask. Automatically detect if a client is
+        # active for Dask-backed data.
         if hasattr(da_in.data, "dask"):
             client = self._dask_client
             if client is None:
@@ -1411,6 +1421,7 @@ class Regridder:
                     client = None
 
             if client is not None:
+                # 1. Distribute sparse weight matrix
                 weights_key = f"weights_{id(self._weights_matrix)}"
                 if weights_key not in _WORKER_CACHE:
                     # Optimization: Use scatter for more efficient distribution of large objects.
@@ -1427,10 +1438,25 @@ class Regridder:
                             workers=workers,
                         )
                     )
-                    _WORKER_CACHE[weights_key] = (
-                        self._weights_matrix
-                    )  # Also cache locally
+                    _WORKER_CACHE[weights_key] = self._weights_matrix  # Also cache locally
                 weights_arg = weights_key
+
+                # 2. Distribute total_weights array (if present)
+                if self._total_weights is not None:
+                    total_weights_key = f"tw_{id(self._total_weights)}"
+                    if total_weights_key not in _WORKER_CACHE:
+                        future_tw = client.scatter(self._total_weights, broadcast=True)
+                        workers = list(client.scheduler_info()["workers"].keys())
+                        client.gather(
+                            client.map(
+                                _setup_worker_cache,
+                                [total_weights_key] * len(workers),
+                                [future_tw] * len(workers),
+                                workers=workers,
+                            )
+                        )
+                        _WORKER_CACHE[total_weights_key] = self._total_weights
+                    total_weights_arg = total_weights_key
 
         # Use allow_rechunk=True to support chunked core dimensions
         # and move output_sizes to dask_gufunc_kwargs for future compatibility
@@ -1443,7 +1469,7 @@ class Regridder:
                 "dims_source": self._dims_source,
                 "shape_target": self._shape_target,
                 "skipna": self.skipna,
-                "total_weights": self._total_weights,
+                "total_weights": total_weights_arg,
                 "na_thres": self.na_thres,
             },
             input_core_dims=[input_core_dims],
@@ -1480,10 +1506,16 @@ class Regridder:
 
         # Update history for provenance
         if update_history_attr:
+            esmpy_version = getattr(esmpy, "__version__", "unknown")
             history_msg = (
-                f"Regridded using Regridder (method={self.method}, "
-                f"periodic={self.periodic}, skipna={self.skipna})"
+                f"Regridded using xregrid.Regridder (ESMF/esmpy={esmpy_version}, "
+                f"method={self.method}, periodic={self.periodic}, skipna={self.skipna}, "
+                f"na_thres={self.na_thres}"
             )
+            if self.extrap_method:
+                history_msg += f", extrap_method={self.extrap_method}"
+            history_msg += ")"
+
             for msg in self.provenance:
                 history_msg += f". {msg}"
             if self.generation_time:
@@ -1526,10 +1558,16 @@ class Regridder:
                 out = out.assign_coords({c: ds_in.coords[c]})
 
         # Update history for provenance
+        esmpy_version = getattr(esmpy, "__version__", "unknown")
         history_msg = (
-            f"Regridded Dataset using Regridder (method={self.method}, "
-            f"periodic={self.periodic}, skipna={self.skipna})"
+            f"Regridded Dataset using xregrid.Regridder (ESMF/esmpy={esmpy_version}, "
+            f"method={self.method}, periodic={self.periodic}, skipna={self.skipna}, "
+            f"na_thres={self.na_thres}"
         )
+        if self.extrap_method:
+            history_msg += f", extrap_method={self.extrap_method}"
+        history_msg += ")"
+
         for msg in self.provenance:
             history_msg += f". {msg}"
         if self.generation_time:
