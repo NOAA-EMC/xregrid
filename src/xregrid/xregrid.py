@@ -383,11 +383,16 @@ def _compute_chunk_weights(
         else:
             # Reconstruct global indices locally to save driver memory (Aero Protocol)
             i0_start, i0_end, i1_start, i1_end, total_size1 = dest_slice_info
-            n0, n1 = i0_end - i0_start, i1_end - i1_start
-            global_indices = (
-                (np.arange(n0)[:, None] + i0_start) * total_size1
-                + (np.arange(n1) + i1_start)
-            ).flatten()
+            if total_size1 == 0:
+                # Unstructured target (1D)
+                global_indices = np.arange(i0_start, i0_end)
+            else:
+                # Structured target (2D)
+                n0, n1 = i0_end - i0_start, i1_end - i1_start
+                global_indices = (
+                    (np.arange(n0)[:, None] + i0_start) * total_size1
+                    + (np.arange(n1) + i1_start)
+                ).flatten()
 
         rows = global_indices[weights["row_dst"] - 1]
         cols = weights["col_src"] - 1
@@ -993,11 +998,6 @@ class Regridder:
         self._dims_target = dst_dims
         self._is_unstructured_tgt = is_unstructured_dst
 
-        if is_unstructured_dst:
-            raise NotImplementedError(
-                "Dask parallelization not yet optimized/verified for unstructured target grids."
-            )
-
         # Get client
         try:
             client = dask.distributed.get_client()
@@ -1008,30 +1008,9 @@ class Regridder:
 
         self._dask_client = client
 
-        # Split target grid along available spatial dimensions
-        dim0 = dst_dims[0]
-        dim1 = dst_dims[1] if len(dst_dims) > 1 else None
-
-        size0 = self.target_grid_ds.sizes[dim0]
-        size1 = self.target_grid_ds.sizes[dim1] if dim1 else 1
-
         # Determine number of chunks. Use number of workers * 2 usually good heuristic
         n_workers = len(client.scheduler_info()["workers"])
         n_chunks_total = max(1, n_workers * 2)
-
-        if dim1 and n_chunks_total > 1:
-            # Try to make chunks approximately square-ish for 2D grids
-            n0 = int(np.sqrt(n_chunks_total * size0 / size1))
-            n0 = max(1, min(n0, size0))
-            n1 = max(1, n_chunks_total // n0)
-            n1 = max(1, min(n1, size1))
-        else:
-            n0 = min(n_chunks_total, size0)
-            n1 = 1
-
-        # Split indices
-        indices0 = np.array_split(np.arange(size0), n0)
-        indices1 = np.array_split(np.arange(size1), n1)
 
         futures = []
 
@@ -1042,25 +1021,20 @@ class Regridder:
                 source_grid_only = source_grid_only.drop_vars(var)
         src_ds_future = client.scatter(source_grid_only, broadcast=True)
 
-        for idx0 in indices0:
-            if len(idx0) == 0:
-                continue
-            for idx1 in indices1:
-                if len(idx1) == 0:
+        if is_unstructured_dst:
+            # Unstructured target: Split along the single dimension
+            dim0 = dst_dims[0]
+            size0 = self.target_grid_ds.sizes[dim0]
+            n_chunks = min(n_chunks_total, size0)
+            indices = np.array_split(np.arange(size0), n_chunks)
+
+            for idx in indices:
+                if len(idx) == 0:
                     continue
-
-                # Slice target grid
-                i0_start, i0_end = idx0[0], idx0[-1] + 1
-                i1_start, i1_end = (idx1[0], idx1[-1] + 1) if dim1 else (0, 1)
-
-                sel_dict = {dim0: slice(i0_start, i0_end)}
-                if dim1:
-                    sel_dict[dim1] = slice(i1_start, i1_end)
-
-                chunk_ds = self.target_grid_ds.isel(sel_dict)
-
-                # Pass slice info instead of massive array to workers (Aero Protocol: Driver Efficiency)
-                dest_slice_info = (i0_start, i0_end, i1_start, i1_end, size1)
+                i_start, i_end = idx[0], idx[-1] + 1
+                chunk_ds = self.target_grid_ds.isel({dim0: slice(i_start, i_end)})
+                # For unstructured, we only need start and end indices
+                dest_slice_info = (i_start, i_end, 0, 0, 0)
 
                 future = client.submit(
                     _compute_chunk_weights,
@@ -1074,6 +1048,60 @@ class Regridder:
                     self.periodic,
                 )
                 futures.append(future)
+        else:
+            # Structured target: 2D split
+            dim0 = dst_dims[0]
+            dim1 = dst_dims[1] if len(dst_dims) > 1 else None
+
+            size0 = self.target_grid_ds.sizes[dim0]
+            size1 = self.target_grid_ds.sizes[dim1] if dim1 else 1
+
+            if dim1 and n_chunks_total > 1:
+                # Try to make chunks approximately square-ish for 2D grids
+                n0 = int(np.sqrt(n_chunks_total * size0 / size1))
+                n0 = max(1, min(n0, size0))
+                n1 = max(1, n_chunks_total // n0)
+                n1 = max(1, min(n1, size1))
+            else:
+                n0 = min(n_chunks_total, size0)
+                n1 = 1
+
+            # Split indices
+            indices0 = np.array_split(np.arange(size0), n0)
+            indices1 = np.array_split(np.arange(size1), n1)
+
+            for idx0 in indices0:
+                if len(idx0) == 0:
+                    continue
+                for idx1 in indices1:
+                    if len(idx1) == 0:
+                        continue
+
+                    # Slice target grid
+                    i0_start, i0_end = idx0[0], idx0[-1] + 1
+                    i1_start, i1_end = (idx1[0], idx1[-1] + 1) if dim1 else (0, 1)
+
+                    sel_dict = {dim0: slice(i0_start, i0_end)}
+                    if dim1:
+                        sel_dict[dim1] = slice(i1_start, i1_end)
+
+                    chunk_ds = self.target_grid_ds.isel(sel_dict)
+
+                    # Pass slice info instead of massive array to workers (Aero Protocol: Driver Efficiency)
+                    dest_slice_info = (i0_start, i0_end, i1_start, i1_end, size1)
+
+                    future = client.submit(
+                        _compute_chunk_weights,
+                        src_ds_future,
+                        chunk_ds,
+                        self.method,
+                        dest_slice_info,
+                        self.extrap_method,
+                        self.extrap_dist_exponent,
+                        self.mask_var,
+                        self.periodic,
+                    )
+                    futures.append(future)
 
         self._dask_futures = futures
 

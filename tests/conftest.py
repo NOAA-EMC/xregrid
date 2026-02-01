@@ -26,8 +26,20 @@ except ImportError:
     mock_esmpy.local_pet.return_value = 0
 
     # Mock Grid
-    mock_grid = MagicMock()
-    mock_esmpy.Grid.return_value = mock_grid
+    class Grid:
+        def __init__(self, *args, **kwargs):
+            self.get_coords = MagicMock()
+            self.get_item = MagicMock()
+            self.add_item = MagicMock()
+            self.staggerloc = [0, 1]
+    mock_esmpy.Grid = Grid
+
+    class LocStream:
+        def __init__(self, *args, **kwargs):
+            self.items = {}
+        def __setitem__(self, key, value):
+            self.items[key] = value
+    mock_esmpy.LocStream = LocStream
 
     # Mock Field
     mock_esmpy.Field.return_value = MagicMock()
