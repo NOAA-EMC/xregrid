@@ -1,8 +1,8 @@
-
 import pytest
 import xarray as xr
 import numpy as np
 import dask.distributed
+
 
 # Setup mock for the driver process too
 def setup_driver_mock():
@@ -39,6 +39,7 @@ def setup_driver_mock():
     class LocStream:
         def __init__(self, *args, **kwargs):
             self.items = {}
+
         def __setitem__(self, key, value):
             self.items[key] = value
 
@@ -55,10 +56,12 @@ def setup_driver_mock():
     mock_esmpy.Regrid.return_value = mock_regrid
     sys.modules["esmpy"] = mock_esmpy
 
+
 # Initialize mock before importing anything from xregrid
 setup_driver_mock()
 
 from xregrid import Regridder, create_global_grid, create_mesh_from_coords  # noqa: E402
+
 
 def setup_worker_mock():
     """Setup esmpy mock for Dask workers."""
@@ -98,6 +101,7 @@ def setup_worker_mock():
     class LocStream:
         def __init__(self, *args, **kwargs):
             self.items = {}
+
         def __setitem__(self, key, value):
             self.items[key] = value
 
@@ -114,6 +118,7 @@ def setup_worker_mock():
     mock_esmpy.Regrid.return_value = mock_regrid
     sys.modules["esmpy"] = mock_esmpy
 
+
 @pytest.fixture(scope="module")
 def dask_client():
     cluster = dask.distributed.LocalCluster(
@@ -125,6 +130,7 @@ def dask_client():
     client.close()
     cluster.close()
 
+
 def test_regrid_structured_to_unstructured_dask(dask_client):
     source_grid = create_global_grid(10, 10)
 
@@ -133,15 +139,13 @@ def test_regrid_structured_to_unstructured_dask(dask_client):
     lat = np.linspace(-90, 90, n_pts)
     target_grid = create_mesh_from_coords(lon, lat, "EPSG:4326")
 
-    regridder = Regridder(
-        source_grid, target_grid, method="nearest_s2d", parallel=True
-    )
+    regridder = Regridder(source_grid, target_grid, method="nearest_s2d", parallel=True)
 
     data = xr.DataArray(
         np.random.rand(source_grid.sizes["lat"], source_grid.sizes["lon"]),
         coords={"lat": source_grid.lat, "lon": source_grid.lon},
         dims=["lat", "lon"],
-        name="test_data"
+        name="test_data",
     )
 
     res = regridder(data)
@@ -150,6 +154,7 @@ def test_regrid_structured_to_unstructured_dask(dask_client):
     assert "n_pts" in res.dims
     assert "lat" in res.coords
     assert "lon" in res.coords
+
 
 def test_regrid_unstructured_to_structured_dask(dask_client):
     n_pts = 50
@@ -160,9 +165,7 @@ def test_regrid_unstructured_to_structured_dask(dask_client):
 
     target_grid = create_global_grid(10, 10)
 
-    regridder = Regridder(
-        source_grid, target_grid, method="nearest_s2d", parallel=True
-    )
+    regridder = Regridder(source_grid, target_grid, method="nearest_s2d", parallel=True)
 
     da = source_grid["test_data"]
     res = regridder(da)
@@ -170,6 +173,7 @@ def test_regrid_unstructured_to_structured_dask(dask_client):
     assert res.shape == (target_grid.sizes["lat"], target_grid.sizes["lon"])
     assert "lat" in res.dims
     assert "lon" in res.dims
+
 
 def test_regrid_unstructured_to_unstructured_dask(dask_client):
     n_pts_src = 50
@@ -183,9 +187,7 @@ def test_regrid_unstructured_to_unstructured_dask(dask_client):
     lat_dst = np.linspace(-90, 90, n_pts_dst)
     target_grid = create_mesh_from_coords(lon_dst, lat_dst, "EPSG:4326")
 
-    regridder = Regridder(
-        source_grid, target_grid, method="nearest_s2d", parallel=True
-    )
+    regridder = Regridder(source_grid, target_grid, method="nearest_s2d", parallel=True)
 
     da = source_grid["test_data"]
     res = regridder(da)

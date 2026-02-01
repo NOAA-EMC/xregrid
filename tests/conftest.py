@@ -32,13 +32,16 @@ except ImportError:
             self.get_item = MagicMock()
             self.add_item = MagicMock()
             self.staggerloc = [0, 1]
+
     mock_esmpy.Grid = Grid
 
     class LocStream:
         def __init__(self, *args, **kwargs):
             self.items = {}
+
         def __setitem__(self, key, value):
             self.items[key] = value
+
     mock_esmpy.LocStream = LocStream
 
     # Mock Field
