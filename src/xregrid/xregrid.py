@@ -1420,25 +1420,27 @@ class Regridder:
                 except (ImportError, ValueError):
                     client = None
 
+            # Verify that the client is functional and has active workers
+            if client is not None:
+                try:
+                    # If scheduler has no workers, don't attempt distributed scattering
+                    if not client.scheduler_info()["workers"]:
+                        client = None
+                except Exception:
+                    client = None
+
             if client is not None:
                 # 1. Distribute sparse weight matrix
                 weights_key = f"weights_{id(self._weights_matrix)}"
                 if weights_key not in _WORKER_CACHE:
                     # Optimization: Use scatter for more efficient distribution of large objects.
                     # This avoids the overhead of sending the large matrix in a blocking client.run call.
-                    # We scatter to all workers and then register the key.
-                    # We use client.map to ensure futures are resolved before registration.
+                    # We scatter to all workers and then register the key using client.run.
                     future = client.scatter(self._weights_matrix, broadcast=True)
-                    workers = list(client.scheduler_info()["workers"].keys())
-                    client.gather(
-                        client.map(
-                            _setup_worker_cache,
-                            [weights_key] * len(workers),
-                            [future] * len(workers),
-                            workers=workers,
-                        )
-                    )
-                    _WORKER_CACHE[weights_key] = self._weights_matrix  # Also cache locally
+                    client.run(_setup_worker_cache, weights_key, future)
+                    _WORKER_CACHE[weights_key] = (
+                        self._weights_matrix
+                    )  # Also cache locally
                 weights_arg = weights_key
 
                 # 2. Distribute total_weights array (if present)
@@ -1446,15 +1448,7 @@ class Regridder:
                     total_weights_key = f"tw_{id(self._total_weights)}"
                     if total_weights_key not in _WORKER_CACHE:
                         future_tw = client.scatter(self._total_weights, broadcast=True)
-                        workers = list(client.scheduler_info()["workers"].keys())
-                        client.gather(
-                            client.map(
-                                _setup_worker_cache,
-                                [total_weights_key] * len(workers),
-                                [future_tw] * len(workers),
-                                workers=workers,
-                            )
-                        )
+                        client.run(_setup_worker_cache, total_weights_key, future_tw)
                         _WORKER_CACHE[total_weights_key] = self._total_weights
                     total_weights_arg = total_weights_key
 

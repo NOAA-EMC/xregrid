@@ -4,6 +4,7 @@ import xarray as xr
 from xregrid import Regridder
 import xregrid.xregrid as xregrid_mod
 
+
 def test_total_weights_distribution_eager_vs_lazy():
     """
     Aero Protocol: Verify that total_weights distribution works correctly
@@ -38,7 +39,9 @@ def test_total_weights_distribution_eager_vs_lazy():
     # Create source data with some NaNs
     data = np.random.rand(10, 20).astype(np.float32)
     data[0, 0] = np.nan
-    da_src_numpy = xr.DataArray(data, coords=ds_src.coords, dims=("lat", "lon"), name="test")
+    da_src_numpy = xr.DataArray(
+        data, coords=ds_src.coords, dims=("lat", "lon"), name="test"
+    )
 
     # 1. Eager Path
     regridder = Regridder(ds_src, ds_tgt, method="bilinear", skipna=True)
@@ -66,6 +69,7 @@ def test_total_weights_distribution_eager_vs_lazy():
     w_keys = [k for k in xregrid_mod._WORKER_CACHE.keys() if k.startswith("weights_")]
     assert len(w_keys) > 0, "Weights matrix should have been cached with a key"
 
+
 def test_provenance_with_extrap():
     """Verify that extrapolation metadata is included in history."""
     ds_src = xr.Dataset(
@@ -86,9 +90,13 @@ def test_provenance_with_extrap():
     ds_tgt.lat.attrs["units"] = "degrees_north"
     ds_tgt.lon.attrs["units"] = "degrees_east"
 
-    da_src = xr.DataArray(np.ones((10, 20)), coords=ds_src.coords, dims=("lat", "lon"), name="test")
+    da_src = xr.DataArray(
+        np.ones((10, 20)), coords=ds_src.coords, dims=("lat", "lon"), name="test"
+    )
 
-    regridder = Regridder(ds_src, ds_tgt, method="bilinear", extrap_method="nearest_s2d")
+    regridder = Regridder(
+        ds_src, ds_tgt, method="bilinear", extrap_method="nearest_s2d"
+    )
     res = regridder(da_src)
 
     assert "extrap_method=nearest_s2d" in res.attrs["history"]
