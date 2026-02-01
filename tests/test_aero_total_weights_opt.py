@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 import xarray as xr
 from xregrid import Regridder
 import xregrid.xregrid as xregrid_mod
@@ -49,7 +48,7 @@ def test_total_weights_distribution_eager_vs_lazy():
 
     # 2. Lazy Path
     with LocalCluster(n_workers=1, threads_per_worker=1, processes=False) as cluster:
-        with Client(cluster) as client:
+        with Client(cluster):
             da_src_dask = da_src_numpy.chunk({"lat": 5, "lon": 10})
             res_dask = regridder(da_src_dask)
 
