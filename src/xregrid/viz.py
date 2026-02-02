@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import xarray as xr
+
+if TYPE_CHECKING:
+    from .xregrid import Regridder
 
 try:
     import matplotlib.pyplot as plt
@@ -269,6 +272,62 @@ def plot_interactive(
             "Install it with `pip install hvplot`."
         )
     return da.hvplot(rasterize=rasterize, title=title, **kwargs)
+
+
+def plot_diagnostics(
+    regridder: "Regridder",
+    projection: Any = None,
+    **kwargs: Any,
+) -> Any:
+    """
+    Track A: Plot spatial diagnostics for a Regridder.
+
+    Parameters
+    ----------
+    regridder : Regridder
+        The Regridder instance to diagnose.
+    projection : cartopy.crs.Projection, optional
+        The projection for the axes.
+    **kwargs : Any
+        Additional arguments passed to plot_static.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The figure object.
+    """
+    if plt is None:
+        raise ImportError("Matplotlib is required for plot_diagnostics.")
+
+    ds_diag = regridder.diagnostics()
+
+    fig, axes = plt.subplots(
+        1,
+        2,
+        figsize=(12, 5),
+        subplot_kw={"projection": projection or (ccrs.PlateCarree() if ccrs else None)},
+    )
+
+    plot_static(
+        ds_diag.weight_sum,
+        ax=axes[0],
+        title="Weight Sum",
+        cmap="viridis",
+        **kwargs,
+    )
+
+    plot_static(
+        ds_diag.unmapped_mask,
+        ax=axes[1],
+        title="Unmapped Mask (1=Unmapped)",
+        cmap="Reds",
+        **kwargs,
+    )
+
+    fig.suptitle(f"Regridder Diagnostics ({regridder.method})", fontsize=16)
+    plt.tight_layout()
+
+    return fig
 
 
 def plot_comparison(

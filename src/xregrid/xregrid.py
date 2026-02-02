@@ -1265,6 +1265,44 @@ class Regridder:
             # Optimization: Use sum(axis=1) instead of memory-intensive ones multiplication
             self._total_weights = np.array(self._weights_matrix.sum(axis=1)).T
 
+    def diagnostics(self) -> xr.Dataset:
+        """
+        Generate spatial diagnostics of the regridding weights.
+
+        Returns
+        -------
+        xr.Dataset
+            Dataset on the target grid containing:
+            - weight_sum: Sum of weights for each destination cell.
+            - unmapped_mask: Boolean mask (1 for unmapped cells, 0 for mapped).
+        """
+        if self._weights_matrix is None:
+            raise RuntimeError("Weights have not been generated yet.")
+
+        # Sum weights for each destination row
+        weights_sum = np.array(self._weights_matrix.sum(axis=1)).flatten()
+        unmapped = (weights_sum == 0).astype(np.int8)
+
+        # Reshape to target grid shape
+        weights_sum_2d = weights_sum.reshape(self._shape_target)
+        unmapped_2d = unmapped.reshape(self._shape_target)
+
+        ds = xr.Dataset(
+            data_vars={
+                "weight_sum": (self._dims_target, weights_sum_2d),
+                "unmapped_mask": (self._dims_target, unmapped_2d),
+            },
+            coords={
+                c: self.target_grid_ds.coords[c]
+                for c in self.target_grid_ds.coords
+                if set(self.target_grid_ds.coords[c].dims).issubset(
+                    set(self._dims_target)
+                )
+            },
+        )
+        update_history(ds, "Generated spatial diagnostics from Regridder weights.")
+        return ds
+
     def quality_report(self, skip_heavy: bool = False) -> dict[str, Any]:
         """
         Generate a scientific quality report of the regridding weights.
@@ -1302,21 +1340,21 @@ class Regridder:
         }
 
         if not skip_heavy:
-            # Sum weights for each destination row
-            weights_sum = np.array(self._weights_matrix.sum(axis=1)).flatten()
+            ds_diag = self.diagnostics()
+            weights_sum = ds_diag.weight_sum
+            unmapped_mask = ds_diag.unmapped_mask
 
-            unmapped = weights_sum == 0
-            unmapped_count = int(np.sum(unmapped))
+            unmapped_count = int(unmapped_mask.sum())
 
             report.update(
                 {
                     "unmapped_count": unmapped_count,
                     "unmapped_fraction": float(unmapped_count / n_dst),
-                    "weight_sum_min": float(np.min(weights_sum[~unmapped]))
+                    "weight_sum_min": float(weights_sum.where(unmapped_mask == 0).min())
                     if unmapped_count < n_dst
                     else 0.0,
-                    "weight_sum_max": float(np.max(weights_sum)),
-                    "weight_sum_mean": float(np.mean(weights_sum)),
+                    "weight_sum_max": float(weights_sum.max()),
+                    "weight_sum_mean": float(weights_sum.mean()),
                 }
             )
         return report
