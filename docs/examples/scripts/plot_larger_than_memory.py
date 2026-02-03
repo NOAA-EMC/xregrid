@@ -24,10 +24,11 @@ from dask.distributed import Client, LocalCluster
 import time
 from xregrid import Regridder
 
+
 def run_example():
     # 1. Setup a local Dask cluster
     # On a laptop, this allows us to use multiple CPU cores and manage memory.
-    cluster = LocalCluster(n_workers=4, threads_per_worker=1, memory_limit='2GB')
+    cluster = LocalCluster(n_workers=4, threads_per_worker=1, memory_limit="2GB")
     client = Client(cluster)
     print(f"Dask Dashboard: {client.dashboard_link}")
 
@@ -52,7 +53,7 @@ def run_example():
             "time": np.arange(nt),
             "lat": (["lat"], lats, {"units": "degrees_north"}),
             "lon": (["lon"], lons, {"units": "degrees_east"}),
-        }
+        },
     )
 
     print(f"Source dataset size: {ds_src.nbytes / 1e9:.2f} GB")
@@ -75,11 +76,7 @@ def run_example():
     print("\nGenerating weights in parallel...")
     start = time.time()
     regridder = Regridder(
-        ds_src,
-        ds_tgt,
-        method="bilinear",
-        periodic=True,
-        parallel=True
+        ds_src, ds_tgt, method="bilinear", periodic=True, parallel=True
     )
     print(f"Weight generation took: {time.time() - start:.2f}s")
 
@@ -106,6 +103,7 @@ def run_example():
 
     client.close()
     cluster.close()
+
 
 if __name__ == "__main__":
     # Wrap in try-except because esmpy might not be available in all environments
