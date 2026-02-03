@@ -85,7 +85,9 @@ def plot_static(
                 # Use cf-xarray to find the grid mapping variable
                 gm_var = da.cf.get_grid_mapping()
                 if gm_var is not None:
-                    crs_info = gm_var.attrs.get("crs_wkt") or gm_var.attrs.get("grid_mapping_name")
+                    crs_info = gm_var.attrs.get("crs_wkt") or gm_var.attrs.get(
+                        "grid_mapping_name"
+                    )
             except (AttributeError, KeyError, ImportError):
                 pass
 

@@ -24,10 +24,18 @@ def test_cf_aware_dimension_mapping():
         data,
         dims=("latitude", "longitude"),
         coords={
-            "latitude": (["latitude"], src_grid.lat.values, {"standard_name": "latitude"}),
-            "longitude": (["longitude"], src_grid.lon.values, {"standard_name": "longitude"}),
+            "latitude": (
+                ["latitude"],
+                src_grid.lat.values,
+                {"standard_name": "latitude"},
+            ),
+            "longitude": (
+                ["longitude"],
+                src_grid.lon.values,
+                {"standard_name": "longitude"},
+            ),
         },
-        name="test_data"
+        name="test_data",
     )
 
     # 5. Eager Regridding
@@ -59,13 +67,21 @@ def test_dataset_cf_awareness():
     ds = xr.Dataset(
         data_vars={
             "temp": (("latitude", "longitude"), np.random.rand(9, 18)),
-            "scalar": 42.0
+            "scalar": 42.0,
         },
         coords={
-            "latitude": (["latitude"], src_grid.lat.values, {"standard_name": "latitude"}),
-            "longitude": (["longitude"], src_grid.lon.values, {"standard_name": "longitude"}),
-            "fixed_coord": ("fixed", [1, 2, 3])
-        }
+            "latitude": (
+                ["latitude"],
+                src_grid.lat.values,
+                {"standard_name": "latitude"},
+            ),
+            "longitude": (
+                ["longitude"],
+                src_grid.lon.values,
+                {"standard_name": "longitude"},
+            ),
+            "fixed_coord": ("fixed", [1, 2, 3]),
+        },
     )
 
     # Regrid

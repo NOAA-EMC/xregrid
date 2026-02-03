@@ -1476,9 +1476,6 @@ class Regridder:
         if missing_dims:
             # Attempt CF-based mapping
             try:
-                cf_lat_dims = da_in.cf["latitude"].dims
-                cf_lon_dims = da_in.cf["longitude"].dims
-
                 # Heuristic: Map cf latitude dims to the first part of _dims_source
                 # and cf longitude dims to the rest.
                 # This is complex for general cases, so we use a safe renaming approach.
@@ -1486,15 +1483,17 @@ class Regridder:
                     # Assume self._dims_source is (lat_dim, lon_dim) for rectilinear
                     # or (y, x) for curvilinear
                     if len(self._dims_source) == 2:
-                        da_in = da_in.cf.rename({
-                            "latitude": self._dims_source[0],
-                            "longitude": self._dims_source[1]
-                        })
+                        da_in = da_in.cf.rename(
+                            {
+                                "latitude": self._dims_source[0],
+                                "longitude": self._dims_source[1],
+                            }
+                        )
                 else:
                     # Unstructured: just one dimension
-                    da_in = da_in.cf.rename({
-                        da_in.cf["latitude"].dims[0]: self._dims_source[0]
-                    })
+                    da_in = da_in.cf.rename(
+                        {da_in.cf["latitude"].dims[0]: self._dims_source[0]}
+                    )
             except (KeyError, AttributeError, ValueError):
                 # Fallback to original dims; xr.apply_ufunc will raise if they don't match
                 pass
@@ -1638,7 +1637,9 @@ class Regridder:
             else:
                 try:
                     # Check if variable has logical latitude and longitude
-                    spatial_dims = set(da.cf["latitude"].dims) | set(da.cf["longitude"].dims)
+                    spatial_dims = set(da.cf["latitude"].dims) | set(
+                        da.cf["longitude"].dims
+                    )
                     if spatial_dims.issubset(set(da.dims)):
                         is_regriddable = True
                 except (KeyError, AttributeError):
