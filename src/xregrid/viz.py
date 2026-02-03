@@ -73,39 +73,47 @@ def plot_static(
         return im
 
     if transform is None and ccrs is not None:
-        # Try to detect CRS from attributes (Aero Protocol)
-        crs_wkt = da.attrs.get("crs") or da.attrs.get("grid_mapping")
+        # Try to detect CRS from attributes (Aero Protocol: Scientific Hygiene)
+        crs_info = da.attrs.get("crs") or da.attrs.get("grid_mapping")
         # Check encoding as well
-        if crs_wkt is None:
-            crs_wkt = da.encoding.get("crs") or da.encoding.get("grid_mapping")
+        if crs_info is None:
+            crs_info = da.encoding.get("crs") or da.encoding.get("grid_mapping")
 
-        # Try cf-xarray if available
-        if crs_wkt is None:
+        # Try cf-xarray for robust grid mapping discovery
+        if crs_info is None:
             try:
                 # Use cf-xarray to find the grid mapping variable
                 gm_var = da.cf.get_grid_mapping()
                 if gm_var is not None:
-                    crs_wkt = gm_var.attrs.get("crs_wkt")
+                    crs_info = gm_var.attrs.get("crs_wkt") or gm_var.attrs.get("grid_mapping_name")
             except (AttributeError, KeyError, ImportError):
                 pass
 
-        if crs_wkt and pyproj is not None:
+        if crs_info and pyproj is not None:
             try:
                 # Use pyproj to identify the CRS
-                proj_crs = pyproj.CRS(crs_wkt)
+                proj_crs = pyproj.CRS(crs_info)
 
-                # Try to find a matching Cartopy projection
+                # Map pyproj CRS to Cartopy projections
                 if proj_crs.is_geographic:
                     transform = ccrs.PlateCarree()
                 elif proj_crs.is_projected:
-                    # Attempt UTM detection
+                    # Attempt robust projection detection
+                    # UTM detection
                     if proj_crs.utm_zone:
                         transform = ccrs.UTM(
                             zone=int(proj_crs.utm_zone[:-1]),
                             southern_hemisphere="S" in proj_crs.utm_zone,
                         )
-                    # Generic fallback for other projected CRS if cartopy supports it
-                    # (Simplified for this implementation)
+                    # Mercator
+                    elif "merc" in proj_crs.to_dict().get("proj", ""):
+                        transform = ccrs.Mercator()
+                    # Lambert Conformal
+                    elif "lcc" in proj_crs.to_dict().get("proj", ""):
+                        transform = ccrs.LambertConformal(
+                            central_longitude=proj_crs.to_dict().get("lon_0", 0.0),
+                            central_latitude=proj_crs.to_dict().get("lat_0", 0.0),
+                        )
             except Exception:
                 pass
 
