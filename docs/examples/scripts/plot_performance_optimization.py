@@ -42,7 +42,27 @@ _ = regridder_cached(ds.air)
 second_time = time.time() - start
 print(f"Second run (reusing weights): {second_time:.2f}s")
 
-print(f"\nSpeedup: {first_time / second_time:.1f}x")
+print(f"\nWeight Reuse Speedup: {first_time / second_time:.1f}x")
+
+# 3. Stationary Mask Optimization
+# XRegrid caches normalization factors when skipna=True if the NaN mask is stationary.
+ds_nans = ds.copy()
+ds_nans["air"].values[:, :10, :10] = np.nan  # Stationary NaN mask
+
+print(f"\nBenchmarking stationary mask optimization (skipna=True)...")
+# First call computes and caches normalization
+start = time.time()
+_ = regridder_cached(ds_nans.air, skipna=True)
+mask_first_time = time.time() - start
+print(f"First apply with NaNs: {mask_first_time:.4f}s")
+
+# Second call uses cached normalization
+start = time.time()
+_ = regridder_cached(ds_nans.air, skipna=True)
+mask_second_time = time.time() - start
+print(f"Second apply with NaNs (cached): {mask_second_time:.4f}s")
+
+print(f"Stationary Mask Speedup: {mask_first_time / mask_second_time:.1f}x")
 
 # Clean up
 if os.path.exists(weights_file):
