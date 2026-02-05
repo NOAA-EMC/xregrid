@@ -1422,7 +1422,10 @@ class Regridder:
         )
 
     def __call__(
-        self, obj: Union[xr.DataArray, xr.Dataset]
+        self,
+        obj: Union[xr.DataArray, xr.Dataset],
+        skipna: Optional[bool] = None,
+        na_thres: Optional[float] = None,
     ) -> Union[xr.DataArray, xr.Dataset]:
         """
         Apply regridding to an input DataArray or Dataset.
@@ -1431,6 +1434,12 @@ class Regridder:
         ----------
         obj : xarray.DataArray or xarray.Dataset
             The input data to regrid.
+        skipna : bool, optional
+            Whether to handle NaNs by re-normalizing weights.
+            If None, uses the value set during initialization.
+        na_thres : float, optional
+            Threshold for NaN handling.
+            If None, uses the value set during initialization.
 
         Returns
         -------
@@ -1440,10 +1449,15 @@ class Regridder:
         if self.parallel and self._weights_matrix is None:
             self.compute()
 
+        if skipna is None:
+            skipna = self.skipna
+        if na_thres is None:
+            na_thres = self.na_thres
+
         if isinstance(obj, xr.Dataset):
-            return self._regrid_dataset(obj)
+            return self._regrid_dataset(obj, skipna=skipna, na_thres=na_thres)
         elif isinstance(obj, xr.DataArray):
-            return self._regrid_dataarray(obj)
+            return self._regrid_dataarray(obj, skipna=skipna, na_thres=na_thres)
         else:
             raise TypeError("Input must be an xarray.DataArray or xarray.Dataset.")
 
@@ -1452,6 +1466,8 @@ class Regridder:
         da_in: xr.DataArray,
         update_history_attr: bool = True,
         _processed_coords: Optional[set[str]] = None,
+        skipna: Optional[bool] = None,
+        na_thres: Optional[float] = None,
     ) -> xr.DataArray:
         """
         Regrid a single DataArray, including auxiliary spatial coordinates.
@@ -1464,6 +1480,10 @@ class Regridder:
             Whether to update the history attribute.
         _processed_coords : set of str, optional
             Set of coordinate names already being processed to avoid infinite recursion.
+        skipna : bool, optional
+            Whether to handle NaNs. If None, uses initialization default.
+        na_thres : float, optional
+            NaN threshold. If None, uses initialization default.
 
         Returns
         -------
@@ -1472,6 +1492,16 @@ class Regridder:
         """
         if _processed_coords is None:
             _processed_coords = set()
+
+        if skipna is None:
+            skipna = self.skipna
+        if na_thres is None:
+            na_thres = self.na_thres
+
+        # If skipna is True, we need _total_weights.
+        # If it was not computed during init, compute it now.
+        if skipna and self._total_weights is None and self._weights_matrix is not None:
+            self._total_weights = np.array(self._weights_matrix.sum(axis=1)).T
 
         # Identify auxiliary coordinates that need regridding (Aero Protocol: Scientific Hygiene)
         aux_coords_to_regrid = {}
@@ -1490,7 +1520,11 @@ class Regridder:
             ):
                 # This is an auxiliary spatial coordinate
                 aux_coords_to_regrid[c_name] = self._regrid_dataarray(
-                    c_da, update_history_attr=False, _processed_coords=_processed_coords
+                    c_da,
+                    update_history_attr=False,
+                    _processed_coords=_processed_coords,
+                    skipna=skipna,
+                    na_thres=na_thres,
                 )
 
         # CF-Awareness: Map logical dimensions to physical dimension names in da_in
@@ -1586,9 +1620,9 @@ class Regridder:
                 "weights_matrix": weights_arg,
                 "dims_source": self._dims_source,
                 "shape_target": self._shape_target,
-                "skipna": self.skipna,
+                "skipna": skipna,
                 "total_weights": total_weights_arg,
-                "na_thres": self.na_thres,
+                "na_thres": na_thres,
             },
             input_core_dims=[input_core_dims],
             output_core_dims=[temp_output_core_dims],
@@ -1631,8 +1665,8 @@ class Regridder:
             esmpy_version = getattr(esmpy, "__version__", "unknown")
             history_msg = (
                 f"Regridded using xregrid.Regridder (ESMF/esmpy={esmpy_version}, "
-                f"method={self.method}, periodic={self.periodic}, skipna={self.skipna}, "
-                f"na_thres={self.na_thres}"
+                f"method={self.method}, periodic={self.periodic}, skipna={skipna}, "
+                f"na_thres={na_thres}"
             )
             if self.extrap_method:
                 history_msg += f", extrap_method={self.extrap_method}"
@@ -1646,7 +1680,12 @@ class Regridder:
 
         return out
 
-    def _regrid_dataset(self, ds_in: xr.Dataset) -> xr.Dataset:
+    def _regrid_dataset(
+        self,
+        ds_in: xr.Dataset,
+        skipna: Optional[bool] = None,
+        na_thres: Optional[float] = None,
+    ) -> xr.Dataset:
         """
         Regrid all data variables and auxiliary coordinates in a Dataset.
 
@@ -1654,12 +1693,21 @@ class Regridder:
         ----------
         ds_in : xr.Dataset
             The input Dataset.
+        skipna : bool, optional
+            Whether to handle NaNs.
+        na_thres : float, optional
+            NaN threshold.
 
         Returns
         -------
         xr.Dataset
             The regridded Dataset.
         """
+        if skipna is None:
+            skipna = self.skipna
+        if na_thres is None:
+            na_thres = self.na_thres
+
         regridded_items: dict[str, Union[xr.DataArray, Any]] = {}
 
         # 1. Regrid data variables
@@ -1683,7 +1731,11 @@ class Regridder:
                 # Initialize _processed_coords with the name of the current variable
                 # to prevent it from trying to regrid itself if it appears as a coordinate.
                 regridded_items[name] = self._regrid_dataarray(
-                    da, update_history_attr=False, _processed_coords={name}
+                    da,
+                    update_history_attr=False,
+                    _processed_coords={name},
+                    skipna=skipna,
+                    na_thres=na_thres,
                 )
             else:
                 regridded_items[name] = da
@@ -1706,6 +1758,8 @@ class Regridder:
                                 ds_in.coords[c],
                                 update_history_attr=False,
                                 _processed_coords={c},
+                                skipna=skipna,
+                                na_thres=na_thres,
                             )
                         }
                     )
@@ -1722,8 +1776,8 @@ class Regridder:
         esmpy_version = getattr(esmpy, "__version__", "unknown")
         history_msg = (
             f"Regridded Dataset using xregrid.Regridder (ESMF/esmpy={esmpy_version}, "
-            f"method={self.method}, periodic={self.periodic}, skipna={self.skipna}, "
-            f"na_thres={self.na_thres}"
+            f"method={self.method}, periodic={self.periodic}, skipna={skipna}, "
+            f"na_thres={na_thres}"
         )
         if self.extrap_method:
             history_msg += f", extrap_method={self.extrap_method}"

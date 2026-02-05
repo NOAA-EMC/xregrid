@@ -1,11 +1,11 @@
+import sys
 import time
+from unittest.mock import MagicMock
+
+import dask.distributed
 import numpy as np
 import xarray as xr
 from scipy.sparse import csr_matrix
-from xregrid.xregrid import _apply_weights_core, _WORKER_CACHE
-import dask.distributed
-import sys
-from unittest.mock import MagicMock
 
 # Mock ESMpy
 mock_esmpy = MagicMock()
@@ -17,6 +17,9 @@ mock_esmpy.RegridMethod.BILINEAR = 0
 mock_esmpy.LogKind.MULTI = 1
 sys.modules["esmpy"] = mock_esmpy
 
+from xregrid.xregrid import _WORKER_CACHE, _apply_weights_core  # noqa: E402
+
+
 def generate_mock_weights(n_src, n_dst, weights_per_row=4):
     nnz = n_dst * weights_per_row
     data = np.random.rand(nnz).astype(np.float32)
@@ -24,8 +27,11 @@ def generate_mock_weights(n_src, n_dst, weights_per_row=4):
     col = np.random.randint(0, n_src, size=nnz)
     return csr_matrix((data, (row, col)), shape=(n_dst, n_src))
 
+
 def benchmark_dask(n_workers, n_chunks, n_lat=360, n_lon=720):
-    cluster = dask.distributed.LocalCluster(n_workers=n_workers, threads_per_worker=1, processes=True)
+    cluster = dask.distributed.LocalCluster(
+        n_workers=n_workers, threads_per_worker=1, processes=True
+    )
     client = dask.distributed.Client(cluster)
 
     try:
@@ -35,7 +41,9 @@ def benchmark_dask(n_workers, n_chunks, n_lat=360, n_lon=720):
 
         # 20 time steps
         data = np.random.rand(20, n_lat, n_lon).astype(np.float32)
-        da = xr.DataArray(data, dims=("time", "lat", "lon")).chunk({"time": 20 // n_chunks})
+        da = xr.DataArray(data, dims=("time", "lat", "lon")).chunk(
+            {"time": 20 // n_chunks}
+        )
 
         # We need to distribute weights to workers
         weights_key = "bench_weights"
@@ -78,6 +86,7 @@ def benchmark_dask(n_workers, n_chunks, n_lat=360, n_lon=720):
         client.close()
         cluster.close()
 
+
 print("| Workers | Chunks | Resolution | Time | Speedup |")
 print("|---------|--------|------------|------|--------|")
 base_time = benchmark_dask(1, 4)
@@ -85,4 +94,4 @@ print(f"| 1 | 4 | 0.5° | {base_time:.2f}s | 1.0x |")
 
 for w in [2, 4]:
     t = benchmark_dask(w, 4)
-    print(f"| {w} | 4 | 0.5° | {t:.2f}s | {base_time/t:.1f}x |")
+    print(f"| {w} | 4 | 0.5° | {t:.2f}s | {base_time / t:.1f}x |")

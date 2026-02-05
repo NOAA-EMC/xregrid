@@ -49,7 +49,7 @@ print(f"\nWeight Reuse Speedup: {first_time / second_time:.1f}x")
 ds_nans = ds.copy()
 ds_nans["air"].values[:, :10, :10] = np.nan  # Stationary NaN mask
 
-print(f"\nBenchmarking stationary mask optimization (skipna=True)...")
+print("\nBenchmarking stationary mask optimization (skipna=True)...")
 # First call computes and caches normalization
 start = time.time()
 _ = regridder_cached(ds_nans.air, skipna=True)

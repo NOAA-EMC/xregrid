@@ -1,6 +1,10 @@
 import sys
+import time
 from unittest.mock import MagicMock
+
 import numpy as np
+import xarray as xr
+from scipy.sparse import csr_matrix
 
 # Mock ESMpy before importing xregrid
 mock_esmpy = MagicMock()
@@ -20,11 +24,8 @@ mock_esmpy.ExtrapMethod.CREEP_FILL = 2
 mock_esmpy.LogKind.MULTI = 1
 sys.modules["esmpy"] = mock_esmpy
 
-import time
-import xarray as xr
-from scipy.sparse import csr_matrix
-from xregrid.xregrid import _apply_weights_core, _WORKER_CACHE
-import pandas as pd
+from xregrid.xregrid import _WORKER_CACHE, _apply_weights_core  # noqa: E402
+
 
 def generate_mock_weights(n_src, n_dst, weights_per_row=4):
     """Generate a mock CSR matrix for benchmarking."""
@@ -34,7 +35,10 @@ def generate_mock_weights(n_src, n_dst, weights_per_row=4):
     col = np.random.randint(0, n_src, size=nnz)
     return csr_matrix((data, (row, col)), shape=(n_dst, n_src))
 
-def benchmark_apply(res_name, n_lat, n_lon, target_n_lat, target_n_lon, n_time=1, skipna=False):
+
+def benchmark_apply(
+    res_name, n_lat, n_lon, target_n_lat, target_n_lon, n_time=1, skipna=False
+):
     n_src = n_lat * n_lon
     n_dst = target_n_lat * target_n_lon
 
@@ -42,7 +46,7 @@ def benchmark_apply(res_name, n_lat, n_lon, target_n_lat, target_n_lon, n_time=1
     data = np.random.rand(n_time, n_lat, n_lon).astype(np.float32)
     da = xr.DataArray(data, dims=("time", "lat", "lon"))
     if skipna:
-        da.values[:, 0:10, 0:10] = np.nan # Add some NaNs
+        da.values[:, 0:10, 0:10] = np.nan  # Add some NaNs
 
     def run():
         return xr.apply_ufunc(
@@ -80,13 +84,14 @@ def benchmark_apply(res_name, n_lat, n_lon, target_n_lat, target_n_lon, n_time=1
     avg_time = (end - start) / n_runs
     return avg_time
 
+
 def benchmark_stationary_mask(n_lat, n_lon, n_time=10):
     n_src = n_lat * n_lon
-    n_dst = n_lat * n_lon # Same size for simplicity
+    n_dst = n_lat * n_lon  # Same size for simplicity
 
     weights = generate_mock_weights(n_src, n_dst)
     data = np.random.rand(n_time, n_lat, n_lon).astype(np.float32)
-    data[:, 0:50, 0:50] = np.nan # Stationary mask
+    data[:, 0:50, 0:50] = np.nan  # Stationary mask
 
     _WORKER_CACHE.clear()
     weights_key = "bench_weights"
@@ -94,11 +99,14 @@ def benchmark_stationary_mask(n_lat, n_lon, n_time=10):
 
     # Time with skipna=True
     start = time.perf_counter()
-    _ = _apply_weights_core(data, weights_key, ("lat", "lon"), (n_lat, n_lon), skipna=True)
+    _ = _apply_weights_core(
+        data, weights_key, ("lat", "lon"), (n_lat, n_lon), skipna=True
+    )
     end = time.perf_counter()
 
     total_time = end - start
     return total_time / n_time
+
 
 resolutions = [
     ("1.0°", 180, 360, 180, 360),
@@ -112,12 +120,15 @@ print("| Resolution | Grid Points | XRegrid Apply Time |")
 print("|------------|-------------|--------------------|")
 for name, ny, nx, tny, tnx in resolutions:
     t = benchmark_apply(name, ny, nx, tny, tnx)
-    print(f"| {name} | {ny*nx:,} | {t*1000:.2f} ms |")
+    print(f"| {name} | {ny * nx:,} | {t * 1000:.2f} ms |")
 
 print("\n## Multi-Time Step Performance (Stationary Mask Caching)")
 print("| Time Steps | Resolution | Avg Time per Step |")
 print("|------------|------------|-------------------|")
 for n_t in [1, 10, 100]:
-    for name, ny, nx, tny, tnx in [("1.0°", 180, 360, 180, 360), ("0.25°", 720, 1440, 720, 1440)]:
+    for name, ny, nx, tny, tnx in [
+        ("1.0°", 180, 360, 180, 360),
+        ("0.25°", 720, 1440, 720, 1440),
+    ]:
         t_per_step = benchmark_stationary_mask(ny, nx, n_time=n_t)
-        print(f"| {n_t} | {name} | {t_per_step*1000:.2f} ms |")
+        print(f"| {n_t} | {name} | {t_per_step * 1000:.2f} ms |")
