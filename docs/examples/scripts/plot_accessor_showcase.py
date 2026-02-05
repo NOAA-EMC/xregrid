@@ -14,7 +14,6 @@ Key concepts demonstrated:
 import xarray as xr
 import numpy as np
 import matplotlib.pyplot as plt
-import xregrid  # Importing xregrid registers the accessors
 
 # Load air_temperature tutorial dataset
 ds = xr.tutorial.open_dataset("air_temperature").isel(time=0)

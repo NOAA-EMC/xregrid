@@ -14,6 +14,7 @@ Each script is self-contained and demonstrates a specific feature:
 
 - `plot_basic_regridding.py`: Standard rectilinear grid regridding.
 - `plot_air_temperature.py`: Upsampling the air_temperature tutorial dataset.
+- `plot_multidimensional_regridding.py`: Regridding 4D datasets with multiple levels.
 - `plot_conservative_regridding.py`: Flux-conserving interpolation for precipitation.
 - `plot_curvilinear_grids.py`: Handling curvilinear Arctic grids (RASM).
 - `plot_roms_example.py`: Regridding curvilinear ROMS ocean model grids.

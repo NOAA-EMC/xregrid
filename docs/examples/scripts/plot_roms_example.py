@@ -46,7 +46,9 @@ ds_regridded = regridder(ds)
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
 # Plot original curvilinear data (first time step, surface level)
-ds.salt.isel(ocean_time=0, s_rho=-1).plot(ax=ax1, x="lon_rho", y="lat_rho", cmap="viridis")
+ds.salt.isel(ocean_time=0, s_rho=-1).plot(
+    ax=ax1, x="lon_rho", y="lat_rho", cmap="viridis"
+)
 ax1.set_title("Original ROMS Salt (Surface)")
 
 # Plot regridded rectilinear data
