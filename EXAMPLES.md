@@ -13,9 +13,12 @@ You can also find the source code for all examples in the [docs/examples/scripts
 Each script is self-contained and demonstrates a specific feature:
 
 - `plot_basic_regridding.py`: Standard rectilinear grid regridding.
+- `plot_air_temperature.py`: Upsampling the air_temperature tutorial dataset.
 - `plot_conservative_regridding.py`: Flux-conserving interpolation for precipitation.
 - `plot_curvilinear_grids.py`: Handling curvilinear Arctic grids (RASM).
+- `plot_roms_example.py`: Regridding curvilinear ROMS ocean model grids.
 - `plot_unstructured_grids.py`: Regridding MPAS/ICON style unstructured grids.
+- `plot_accessor_showcase.py`: Simplified workflows using the `.regrid.to()` accessor.
 - `plot_weather_data.py`: Regridding station-like point data.
 - `plot_performance_optimization.py`: Efficient workflows using weight reuse.
 - `plot_larger_than_memory.py`: Regridding massive datasets using Dask and parallel weight generation.
