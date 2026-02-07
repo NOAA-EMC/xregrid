@@ -66,10 +66,20 @@ def _get_mesh_info(
         if "lat" in ds and "lon" in ds:
             lat = ds["lat"]
             lon = ds["lon"]
+        elif "latCell" in ds and "lonCell" in ds:
+            lat = ds["latCell"]
+            lon = ds["lonCell"]
+        elif "lat_node" in ds and "lon_node" in ds:
+            lat = ds["lat_node"]
+            lon = ds["lon_node"]
+        elif "latitude" in ds and "longitude" in ds:
+            lat = ds["latitude"]
+            lon = ds["longitude"]
         else:
             raise KeyError(
                 "Could not find latitude/longitude coordinates. "
-                "Ensure they are named 'lat'/'lon' or have CF attributes."
+                "Ensure they are named 'lat'/'lon', 'latCell'/'lonCell', "
+                "'lat_node'/'lon_node', or have CF attributes."
             )
 
     if lat.ndim == 2:
@@ -166,6 +176,13 @@ def _get_grid_bounds(
     return None, None
 
 
+def _to_degrees(da: xr.DataArray) -> xr.DataArray:
+    """Convert coordinates to degrees if they are in radians."""
+    if da.attrs.get("units") in ["radian", "radians", "rad"]:
+        return da * 180.0 / np.pi
+    return da
+
+
 def _create_esmf_grid(
     ds: xr.Dataset,
     method: str,
@@ -202,12 +219,16 @@ def _create_esmf_grid(
                 f"Method '{method}' is not yet supported for unstructured grids."
             )
         locstream = esmpy.LocStream(shape[0], coord_sys=esmpy.CoordSys.SPH_DEG)
-        locstream["ESMF:Lon"] = lon.values.astype(np.float64)
-        locstream["ESMF:Lat"] = lat.values.astype(np.float64)
+        locstream["ESMF:Lon"] = _to_degrees(lon).values.astype(np.float64)
+        locstream["ESMF:Lat"] = _to_degrees(lat).values.astype(np.float64)
+
+        if mask_var and mask_var in ds:
+            locstream["ESMF:Mask"] = ds[mask_var].values.astype(np.int32)
+
         return locstream, provenance
     else:
-        lon_f = lon.values.T
-        lat_f = lat.values.T
+        lon_f = _to_degrees(lon).values.T
+        lat_f = _to_degrees(lat).values.T
         shape_f = lon_f.shape
 
         num_peri_dims = 1 if periodic else None
@@ -369,7 +390,7 @@ def _compute_chunk_weights(
             regrid_kwargs["extrap_method"] = extrap_method_map[extrap_method]
             regrid_kwargs["extrap_dist_exponent"] = extrap_dist_exponent
 
-        if isinstance(src_field.grid, esmpy.Grid) and mask_var:
+        if mask_var:
             regrid_kwargs["src_mask_values"] = np.array([0], dtype=np.int32)
 
         # 4. Generate weights
@@ -945,9 +966,8 @@ class Regridder:
             regrid_kwargs["extrap_method"] = self.extrap_method_map[self.extrap_method]
             regrid_kwargs["extrap_dist_exponent"] = self.extrap_dist_exponent
 
-        if not self._is_unstructured_src and not self._is_unstructured_tgt:
-            if self.mask_var and self.mask_var in self.source_grid_ds:
-                regrid_kwargs["src_mask_values"] = np.array([0], dtype=np.int32)
+        if self.mask_var and self.mask_var in self.source_grid_ds:
+            regrid_kwargs["src_mask_values"] = np.array([0], dtype=np.int32)
 
         # Build Regrid object
         regrid = esmpy.Regrid(src_field, dst_field, **regrid_kwargs)
