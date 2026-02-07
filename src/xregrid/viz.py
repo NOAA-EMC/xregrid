@@ -80,20 +80,25 @@ def plot_static(
         return im
 
     if transform is None and ccrs is not None:
-        # Try to detect CRS from attributes (Aero Protocol: Scientific Hygiene)
-        crs_info = da.attrs.get("crs") or da.attrs.get("grid_mapping")
-        # Check encoding as well
-        if crs_info is None:
-            crs_info = da.encoding.get("crs") or da.encoding.get("grid_mapping")
+        # Try to detect CRS from attributes and encoding (Aero Protocol: Scientific Hygiene)
+        # We prioritize 'grid_mapping' then 'crs'
+        crs_info = (
+            da.attrs.get("grid_mapping")
+            or da.encoding.get("grid_mapping")
+            or da.attrs.get("crs")
+            or da.encoding.get("crs")
+        )
 
-        # Try cf-xarray for robust grid mapping discovery
-        if crs_info is None:
+        # Try cf-xarray for robust grid mapping discovery (Aero Protocol: CF-Awareness)
+        if crs_info is None or isinstance(crs_info, str):
             try:
                 # Use cf-xarray to find the grid mapping variable
                 gm_var = da.cf.get_grid_mapping()
                 if gm_var is not None:
-                    crs_info = gm_var.attrs.get("crs_wkt") or gm_var.attrs.get(
-                        "grid_mapping_name"
+                    crs_info = (
+                        gm_var.attrs.get("crs_wkt")
+                        or gm_var.attrs.get("spatial_ref")
+                        or gm_var.attrs.get("grid_mapping_name")
                     )
             except (AttributeError, KeyError, ImportError):
                 pass

@@ -129,6 +129,9 @@ def load_esmf_file(filepath: str) -> xr.Dataset:
     """
     Load an ESMF mesh, mosaic, or grid file into an xarray Dataset.
 
+    Automatically recognizes SCRIP/ESMF standard variable names and renames
+    them to 'lat', 'lon', 'lat_b', 'lon_b' while adding CF attributes.
+
     Parameters
     ----------
     filepath : str
@@ -139,11 +142,45 @@ def load_esmf_file(filepath: str) -> xr.Dataset:
     xr.Dataset
         The dataset representation of the ESMF file.
     """
-    # This is a basic implementation using xarray to open NetCDF files
-    # which many ESMF files are.
     ds = xr.open_dataset(filepath)
 
-    update_history(ds, f"Loaded ESMF file from {filepath}.")
+    # Recognize SCRIP/ESMF standard names
+    rename_map = {
+        "grid_center_lat": "lat",
+        "grid_center_lon": "lon",
+        "grid_corner_lat": "lat_b",
+        "grid_corner_lon": "lon_b",
+        "grid_imask": "mask",
+    }
+
+    found_renames = {k: v for k, v in rename_map.items() if k in ds}
+
+    if found_renames:
+        ds = ds.rename(found_renames)
+        message = f"Loaded ESMF file and renamed standard variables: {found_renames}"
+    else:
+        message = f"Loaded ESMF file from {filepath}."
+
+    # Add CF attributes if missing for better cf-xarray discovery
+    if "lat" in ds:
+        if "units" not in ds["lat"].attrs:
+            ds["lat"].attrs["units"] = "degrees_north"
+        if "standard_name" not in ds["lat"].attrs:
+            ds["lat"].attrs["standard_name"] = "latitude"
+
+    if "lon" in ds:
+        if "units" not in ds["lon"].attrs:
+            ds["lon"].attrs["units"] = "degrees_east"
+        if "standard_name" not in ds["lon"].attrs:
+            ds["lon"].attrs["standard_name"] = "longitude"
+
+    # Link bounds if present
+    if "lat" in ds and "lat_b" in ds:
+        ds["lat"].attrs["bounds"] = "lat_b"
+    if "lon" in ds and "lon_b" in ds:
+        ds["lon"].attrs["bounds"] = "lon_b"
+
+    update_history(ds, message)
 
     return ds
 

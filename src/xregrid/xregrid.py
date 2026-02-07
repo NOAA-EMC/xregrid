@@ -1357,7 +1357,9 @@ class Regridder:
         update_history(ds, "Generated spatial diagnostics from Regridder weights.")
         return ds
 
-    def quality_report(self, skip_heavy: bool = False) -> dict[str, Any]:
+    def quality_report(
+        self, skip_heavy: bool = False, format: str = "dict"
+    ) -> Union[dict[str, Any], xr.Dataset]:
         """
         Generate a scientific quality report of the regridding weights.
 
@@ -1366,11 +1368,13 @@ class Regridder:
         skip_heavy : bool, default False
             If True, skip metrics that require full weight matrix summation
             (expensive for massive grids).
+        format : str, default 'dict'
+            The output format: 'dict' or 'dataset'.
 
         Returns
         -------
-        dict
-            Dictionary containing quality metrics:
+        dict or xr.Dataset
+            Quality metrics including unmapped points and weight sums.
             - unmapped_count: Number of destination points with no weights.
             - unmapped_fraction: Fraction of unmapped destination points.
             - weight_sum_min: Minimum sum of weights across destination points.
@@ -1411,6 +1415,23 @@ class Regridder:
                     "weight_sum_mean": float(weights_sum.mean()),
                 }
             )
+
+        if format == "dataset":
+            ds_report = xr.Dataset(
+                data_vars={
+                    k: ([], v, {"description": f"Quality metric: {k}"})
+                    for k, v in report.items()
+                    if isinstance(v, (int, float)) or np.issubdtype(type(v), np.number)
+                },
+                attrs={
+                    "method": self.method,
+                    "periodic": int(self.periodic),
+                    "provenance": "; ".join(self.provenance),
+                },
+            )
+            update_history(ds_report, "Generated scientific quality report.")
+            return ds_report
+
         return report
 
     def weights_to_xarray(self) -> xr.Dataset:
@@ -1560,9 +1581,9 @@ class Regridder:
         # Identify auxiliary coordinates that need regridding (Aero Protocol: Scientific Hygiene)
         aux_coords_to_regrid = {}
 
-        # Track this DataArray to prevent mutual recursion
-        if da_in.name:
-            _processed_coords.add(da_in.name)
+        # Track this DataArray to prevent mutual recursion (Aero Protocol: Robustness)
+        if da_in.name is not None:
+            _processed_coords.add(str(da_in.name))
 
         for c_name, c_da in da_in.coords.items():
             # Avoid infinite recursion
