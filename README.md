@@ -9,8 +9,9 @@ XRegrid is a high-performance regridding library that builds on top of ESMF (Ear
 ## Key Features
 
 - **High Performance**: Up to 35x faster than xESMF for single time-step regridding.
-- **Correct ESMF Integration**: Native support for rectilinear and curvilinear grids.
-- **Dask Integration**: Seamless parallel processing with Dask arrays and optimized worker-local weight caching.
+- **Correct ESMF Integration**: Native support for rectilinear, curvilinear, and unstructured grids.
+- **Unstructured Support**: Automatic handling of MPAS and UGRID datasets, including **conservative regridding** via mesh triangulation.
+- **Dask Integration**: Seamless parallel processing with Dask arrays, including **parallel weight generation** for all grid types.
 - **NOAA RDHPCS Support**: Built-in helpers for Hera, Jet, Gaea, and Ursa via `dask-jobqueue`.
 - **Memory Efficient**: Optimized sparse matrix operations using scipy.
 - **xarray Compatible**: Native support for xarray datasets and data arrays.
