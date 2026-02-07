@@ -108,6 +108,7 @@ def test_eager_lazy_identity_extrap():
 
 # --- New Enhancements Tests ---
 
+
 def test_load_esmf_file_scrip(tmp_path):
     """Verify load_esmf_file handles SCRIP variable names correctly."""
     filepath = os.path.join(tmp_path, "scrip_grid.nc")
@@ -117,8 +118,14 @@ def test_load_esmf_file_scrip(tmp_path):
         data_vars={
             "grid_center_lat": (["grid_size"], [10.0, 20.0]),
             "grid_center_lon": (["grid_size"], [30.0, 40.0]),
-            "grid_corner_lat": (["grid_size", "grid_corners"], [[9, 11, 11, 9], [19, 21, 21, 19]]),
-            "grid_corner_lon": (["grid_size", "grid_corners"], [[29, 29, 31, 31], [39, 39, 41, 41]]),
+            "grid_corner_lat": (
+                ["grid_size", "grid_corners"],
+                [[9, 11, 11, 9], [19, 21, 21, 19]],
+            ),
+            "grid_corner_lon": (
+                ["grid_size", "grid_corners"],
+                [[29, 29, 31, 31], [39, 39, 41, 41]],
+            ),
             "grid_imask": (["grid_size"], [1, 1]),
         }
     )
@@ -138,6 +145,7 @@ def test_load_esmf_file_scrip(tmp_path):
     assert "history" in ds_loaded.attrs
     assert "renamed standard variables" in ds_loaded.attrs["history"]
 
+
 def test_quality_report_dataset():
     """Verify Regridder.quality_report supports format='dataset'."""
     src_grid = create_global_grid(30, 30)
@@ -154,6 +162,7 @@ def test_quality_report_dataset():
     assert report_ds.attrs["method"] == "bilinear"
     assert "history" in report_ds.attrs
 
+
 def test_regrid_recursion_safety_double_check():
     """Aero Protocol Double-Check: Verify recursion safety and backend identity."""
     src_grid = create_global_grid(10, 10)
@@ -163,12 +172,14 @@ def test_regrid_recursion_safety_double_check():
 
     # Create an unnamed DataArray with an auxiliary coordinate
     data = np.random.rand(18, 36).astype(np.float32)
-    aux_coord = xr.DataArray(np.random.rand(18, 36).astype(np.float32), dims=("lat", "lon"), name="aux")
+    aux_coord = xr.DataArray(
+        np.random.rand(18, 36).astype(np.float32), dims=("lat", "lon"), name="aux"
+    )
 
     da_eager = xr.DataArray(
         data,
         coords={"lat": src_grid.lat, "lon": src_grid.lon, "aux": aux_coord},
-        dims=("lat", "lon")
+        dims=("lat", "lon"),
     )
 
     # Eager result
@@ -188,6 +199,7 @@ def test_regrid_recursion_safety_double_check():
     assert res_eager.name is None
     assert "aux" in res_eager.coords
     assert res_eager.aux.shape == (9, 18)
+
 
 if __name__ == "__main__":
     pytest.main([__file__])
