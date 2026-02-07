@@ -419,6 +419,7 @@ def _create_esmf_grid(
             )
 
             node_count = len(node_lon)
+            # ESMF/ESMPy typically expects 32-bit integers for IDs and connectivity
             node_ids = np.arange(1, node_count + 1, dtype=np.int32)
             node_coords = np.column_stack([node_lon, node_lat]).flatten()
             node_owners = np.zeros(node_count, dtype=np.int32)  # Single processor
@@ -426,7 +427,7 @@ def _create_esmf_grid(
             mesh.add_nodes(
                 node_count,
                 node_ids.reshape(-1, 1),
-                node_coords.reshape(-1, 1),
+                node_coords,  # node_coords must be 1D
                 node_owners.reshape(-1, 1),
             )
 
@@ -439,9 +440,9 @@ def _create_esmf_grid(
 
             mesh.add_elements(
                 len(element_ids),
-                element_ids.astype(np.int32).reshape(-1, 1),
-                element_types.astype(np.int32).reshape(-1, 1),
-                element_conn.astype(np.int32),
+                np.array(element_ids, dtype=np.int32).reshape(-1, 1),
+                np.array(element_types, dtype=np.int32).reshape(-1, 1),
+                np.array(element_conn, dtype=np.int32),
                 element_mask=mask_arg,
             )
 
