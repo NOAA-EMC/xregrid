@@ -419,23 +419,28 @@ def _create_esmf_grid(
             )
 
             node_count = len(node_lon)
-            node_ids = np.arange(1, node_count + 1)
+            node_ids = np.arange(1, node_count + 1, dtype=np.int32)
             node_coords = np.column_stack([node_lon, node_lat]).flatten()
             node_owners = np.zeros(node_count, dtype=np.int32)  # Single processor
 
-            mesh.add_nodes(node_count, node_ids, node_coords, node_owners)
+            mesh.add_nodes(
+                node_count,
+                node_ids.reshape(-1, 1),
+                node_coords.reshape(-1, 1),
+                node_owners.reshape(-1, 1),
+            )
 
             mask_arg = None
             if mask_var and mask_var in ds:
                 # Map original cell mask to triangulated elements
                 mask_val = ds[mask_var].values
                 element_mask = mask_val[orig_idx].astype(np.int32)
-                mask_arg = element_mask
+                mask_arg = element_mask.reshape(-1, 1)
 
             mesh.add_elements(
                 len(element_ids),
-                element_ids.astype(np.int32),
-                element_types.astype(np.int32),
+                element_ids.astype(np.int32).reshape(-1, 1),
+                element_types.astype(np.int32).reshape(-1, 1),
                 element_conn.astype(np.int32),
                 element_mask=mask_arg,
             )

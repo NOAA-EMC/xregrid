@@ -21,11 +21,12 @@ import xarray as xr
 from xregrid import Regridder, create_global_grid
 
 # 1. Create a synthetic MPAS-like dataset
-# We'll create a small 10x10 regular mesh but represent it as an unstructured MPAS grid.
-# This ensures a valid, non-degenerate mesh for conservative regridding.
-n_lon, n_lat = 12, 10
-lon_edges = np.linspace(0, 360, n_lon + 1)
-lat_edges = np.linspace(-90, 90, n_lat + 1)
+# We'll create a small regional mesh to avoid complexities with poles
+# and prime meridian in this synthetic example.
+n_lon, n_lat = 10, 8
+# Stay away from poles and prime meridian wrap for a simple synthetic mesh
+lon_edges = np.linspace(10, 170, n_lon + 1)
+lat_edges = np.linspace(-60, 60, n_lat + 1)
 lon_centers = 0.5 * (lon_edges[:-1] + lon_edges[1:])
 lat_centers = 0.5 * (lat_edges[:-1] + lat_edges[1:])
 lon_mesh, lat_mesh = np.meshgrid(lon_centers, lat_centers)
@@ -41,7 +42,7 @@ verticesOnCell = np.zeros((nCells, 4), dtype=int)
 for j in range(n_lat):
     for i in range(n_lon):
         idx = j * n_lon + i
-        # Counter-clockwise: (j, i), (j, i+1), (j+1, i+1), (j+1, i)
+        # Counter-clockwise: (j, i), (j, i + 1), (j + 1, i + 1), (j + 1, i)
         verticesOnCell[idx] = [
             v_idx[j, i],
             v_idx[j, i + 1],
@@ -91,6 +92,8 @@ sc = ax1.scatter(
     cmap="Spectral_r",
 )
 ax1.set_title("MPAS Cell Centers (Source)")
+ax1.set_xlabel("Longitude")
+ax1.set_ylabel("Latitude")
 plt.colorbar(sc, ax=ax1)
 
 # Plot regridded result
