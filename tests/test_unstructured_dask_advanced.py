@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
+
 # Setup mock for the driver process
 def setup_driver_mock():
     if "esmpy" in sys.modules and isinstance(sys.modules["esmpy"], MagicMock):
@@ -25,6 +26,12 @@ def setup_driver_mock():
     mock_esmpy.ExtrapMethod.NEAREST_STOD = 0
     mock_esmpy.ExtrapMethod.NEAREST_IDAVG = 1
     mock_esmpy.ExtrapMethod.CREEP_FILL = 2
+    mock_esmpy.MeshLoc.NODE = 0
+    mock_esmpy.MeshLoc.ELEMENT = 1
+    mock_esmpy.MeshElemType.TRI = 1
+    mock_esmpy.MeshElemType.QUAD = 2
+    mock_esmpy.NormType.FRACAREA = 0
+    mock_esmpy.NormType.DSTAREA = 1
     mock_esmpy.Manager.return_value = MagicMock()
     mock_esmpy.pet_count.return_value = 1
     mock_esmpy.local_pet.return_value = 0
@@ -46,6 +53,18 @@ def setup_driver_mock():
 
     mock_esmpy.Grid = Grid
     mock_esmpy.LocStream = LocStream
+
+    class Mesh:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def add_nodes(self, *args, **kwargs):
+            pass
+
+        def add_elements(self, *args, **kwargs):
+            pass
+
+    mock_esmpy.Mesh = Mesh
     mock_esmpy.Field.return_value = MagicMock()
     mock_regrid = MagicMock()
     mock_regrid.get_factors.return_value = (np.array([0]), np.array([0]))
@@ -76,8 +95,21 @@ def setup_worker_mock():
     mock_esmpy = MagicMock()
     mock_esmpy.CoordSys.SPH_DEG = 1
     mock_esmpy.StaggerLoc.CENTER = 0
+    mock_esmpy.RegridMethod.BILINEAR = 0
+    mock_esmpy.RegridMethod.CONSERVE = 1
     mock_esmpy.RegridMethod.NEAREST_STOD = 2
+    mock_esmpy.RegridMethod.NEAREST_DTOS = 3
+    mock_esmpy.RegridMethod.PATCH = 4
     mock_esmpy.UnmappedAction.IGNORE = 1
+    mock_esmpy.ExtrapMethod.NEAREST_STOD = 0
+    mock_esmpy.ExtrapMethod.NEAREST_IDAVG = 1
+    mock_esmpy.ExtrapMethod.CREEP_FILL = 2
+    mock_esmpy.MeshLoc.NODE = 0
+    mock_esmpy.MeshLoc.ELEMENT = 1
+    mock_esmpy.MeshElemType.TRI = 1
+    mock_esmpy.MeshElemType.QUAD = 2
+    mock_esmpy.NormType.FRACAREA = 0
+    mock_esmpy.NormType.DSTAREA = 1
     mock_esmpy.Manager.return_value = MagicMock()
     mock_esmpy.pet_count.return_value = 1
     mock_esmpy.local_pet.return_value = 0
@@ -95,8 +127,19 @@ def setup_worker_mock():
         def __setitem__(self, key, value):
             self.items[key] = value
 
+    class Mesh:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def add_nodes(self, *args, **kwargs):
+            pass
+
+        def add_elements(self, *args, **kwargs):
+            pass
+
     mock_esmpy.Grid = Grid
     mock_esmpy.LocStream = LocStream
+    mock_esmpy.Mesh = Mesh
     mock_esmpy.Field.return_value = MagicMock()
     mock_regrid = MagicMock()
     mock_regrid.get_factors.return_value = (np.array([0]), np.array([0]))
@@ -228,3 +271,64 @@ def test_structured_to_unstructured_mask_dask(dask_client):
     assert res.chunks is not None
     val = res.compute()
     assert val.shape == (n_pts,)
+
+
+def test_mpas_conservative_regrid_dask(dask_client):
+    # Mock MPAS dataset
+    nCells = 20
+    nVertices = 40
+    ds = xr.Dataset(
+        coords={
+            "latCell": (["nCells"], np.linspace(-90, 90, nCells)),
+            "lonCell": (["nCells"], np.linspace(0, 360, nCells)),
+            "latVertex": (["nVertices"], np.linspace(-90, 90, nVertices)),
+            "lonVertex": (["nVertices"], np.linspace(0, 360, nVertices)),
+            "verticesOnCell": (
+                ["nCells", "maxNodes"],
+                np.random.randint(1, nVertices + 1, (nCells, 6)),
+            ),
+            "nEdgesOnCell": (["nCells"], np.full(nCells, 6)),
+        }
+    )
+    ds["test_var"] = (["nCells"], np.random.rand(nCells))
+
+    target_grid = create_global_grid(10, 10)
+
+    # Use conservative method
+    regridder = Regridder(ds, target_grid, method="conservative", parallel=True)
+
+    res = regridder(ds["test_var"])
+    assert res.shape == (target_grid.sizes["lat"], target_grid.sizes["lon"])
+    val = res.compute()
+    assert not np.isnan(val).all()
+
+
+def test_ugrid_conservative_regrid_dask(dask_client):
+    # Mock UGRID dataset
+    nFaces = 20
+    nNodes = 40
+    ds = xr.Dataset(
+        coords={
+            "lat_node": (["nNodes"], np.linspace(-90, 90, nNodes)),
+            "lon_node": (["nNodes"], np.linspace(0, 360, nNodes)),
+            "lat": (["nFaces"], np.linspace(-90, 90, nFaces)),
+            "lon": (["nFaces"], np.linspace(0, 360, nFaces)),
+            "face_node_connectivity": (
+                ["nFaces", "nMaxNodes"],
+                np.random.randint(0, nNodes, (nFaces, 4)),
+            ),
+        }
+    )
+    ds["face_node_connectivity"].attrs["cf_role"] = "face_node_connectivity"
+    ds["face_node_connectivity"].attrs["start_index"] = 0
+    ds["test_var"] = (["nFaces"], np.random.rand(nFaces))
+
+    target_grid = create_global_grid(10, 10)
+
+    # Use conservative method
+    regridder = Regridder(ds, target_grid, method="conservative", parallel=True)
+
+    res = regridder(ds["test_var"])
+    assert res.shape == (target_grid.sizes["lat"], target_grid.sizes["lon"])
+    val = res.compute()
+    assert not np.isnan(val).all()

@@ -183,12 +183,134 @@ def _to_degrees(da: xr.DataArray) -> xr.DataArray:
     return da
 
 
+def _get_unstructured_mesh_info(
+    ds: xr.Dataset,
+) -> Tuple[
+    np.ndarray,  # node_lon
+    np.ndarray,  # node_lat
+    np.ndarray,  # element_conn
+    np.ndarray,  # element_types
+    np.ndarray,  # element_ids
+    Optional[np.ndarray],  # orig_cell_index
+]:
+    """
+    Extract unstructured mesh connectivity and vertex info for ESMF Mesh.
+
+    Supports MPAS and UGRID conventions.
+    """
+    # 1. Detect MPAS
+    if "verticesOnCell" in ds and "latVertex" in ds and "lonVertex" in ds:
+        node_lat = _to_degrees(ds["latVertex"]).values
+        node_lon = _to_degrees(ds["lonVertex"]).values
+        conn_raw = ds["verticesOnCell"].values
+        n_edges = (
+            ds["nEdgesOnCell"].values
+            if "nEdgesOnCell" in ds
+            else np.full(ds.sizes["nCells"], conn_raw.shape[1])
+        )
+
+        element_conn = []
+        element_types = []
+        element_ids = []
+        orig_cell_index = []
+
+        # MPAS is 1-based indexing
+        for i in range(len(n_edges)):
+            valid_conn = conn_raw[i, : n_edges[i]]
+            # Triangulate polygon if it's not a triangle or quad
+            # Actually, we can just triangulate everything into triangles for simplicity
+            for j in range(1, len(valid_conn) - 1):
+                element_conn.extend([valid_conn[0], valid_conn[j], valid_conn[j + 1]])
+                element_types.append(esmpy.MeshElemType.TRI)
+                element_ids.append(len(element_types))
+                orig_cell_index.append(i)
+
+        return (
+            node_lon,
+            node_lat,
+            np.array(element_conn),
+            np.array(element_types),
+            np.array(element_ids),
+            np.array(orig_cell_index),
+        )
+
+    # 2. Detect UGRID
+    # Look for face_node_connectivity
+    conn_var = None
+    for var in ds.data_vars:
+        if ds[var].attrs.get("cf_role") == "face_node_connectivity":
+            conn_var = var
+            break
+
+    if not conn_var:
+        # Fallback to standard names
+        if "face_node_connectivity" in ds:
+            conn_var = "face_node_connectivity"
+
+    if conn_var:
+        mesh_name = ds[conn_var].attrs.get("mesh", "")
+        # Try to find node coordinates
+        node_lon_var = None
+        node_lat_var = None
+        if mesh_name and mesh_name in ds:
+            node_coords_attr = ds[mesh_name].attrs.get("node_coordinates", "").split()
+            if len(node_coords_attr) >= 2:
+                node_lon_var = node_coords_attr[0]
+                node_lat_var = node_coords_attr[1]
+
+        if not node_lon_var:
+            # Fallback
+            node_lon_var = "node_lon" if "node_lon" in ds else "lon_node"
+            node_lat_var = "node_lat" if "node_lat" in ds else "lat_node"
+
+        if node_lon_var in ds and node_lat_var in ds:
+            node_lon = _to_degrees(ds[node_lon_var]).values
+            node_lat = _to_degrees(ds[node_lat_var]).values
+            conn_raw = ds[conn_var].values
+            start_index = ds[conn_var].attrs.get("start_index", 0)
+            fill_value = ds[conn_var].attrs.get("_FillValue", -1)
+
+            element_conn = []
+            element_types = []
+            element_ids = []
+            orig_cell_index = []
+
+            for i in range(conn_raw.shape[0]):
+                valid_conn = conn_raw[i, :]
+                valid_conn = valid_conn[valid_conn != fill_value]
+                # ESMF Mesh expects 1-based indexing
+                valid_conn = valid_conn - start_index + 1
+
+                for j in range(1, len(valid_conn) - 1):
+                    element_conn.extend(
+                        [valid_conn[0], valid_conn[j], valid_conn[j + 1]]
+                    )
+                    element_types.append(esmpy.MeshElemType.TRI)
+                    element_ids.append(len(element_types))
+                    orig_cell_index.append(i)
+
+            return (
+                node_lon,
+                node_lat,
+                np.array(element_conn),
+                np.array(element_types),
+                np.array(element_ids),
+                np.array(orig_cell_index),
+            )
+
+    raise ValueError(
+        "Could not find unstructured mesh connectivity (MPAS or UGRID) for conservative regridding."
+    )
+
+
 def _create_esmf_grid(
     ds: xr.Dataset,
     method: str,
     periodic: bool = False,
     mask_var: Optional[str] = None,
-) -> Tuple[Union[esmpy.Grid, esmpy.LocStream], list[str]]:
+) -> Tuple[
+    Union[esmpy.Grid, esmpy.LocStream, esmpy.Mesh], list[str], Optional[np.ndarray]
+]:
     """
     Create an ESMF Grid or LocStream from an xarray Dataset.
 
@@ -212,11 +334,47 @@ def _create_esmf_grid(
     """
     lon, lat, shape, dims, is_unstructured = _get_mesh_info(ds)
     provenance = []
+    orig_idx = None
 
     if is_unstructured:
+        if method == "conservative":
+            # Use Mesh for conservative regridding
+            node_lon, node_lat, element_conn, element_types, element_ids, orig_idx = (
+                _get_unstructured_mesh_info(ds)
+            )
+
+            mesh = esmpy.Mesh(
+                parametric_dim=2, spatial_dim=2, coord_sys=esmpy.CoordSys.SPH_DEG
+            )
+
+            node_count = len(node_lon)
+            node_ids = np.arange(1, node_count + 1)
+            node_coords = np.column_stack([node_lon, node_lat]).flatten()
+            node_owners = np.zeros(node_count, dtype=np.int32)  # Single processor
+
+            mesh.add_nodes(node_count, node_ids, node_coords, node_owners)
+
+            mask_arg = None
+            if mask_var and mask_var in ds:
+                # Map original cell mask to triangulated elements
+                mask_val = ds[mask_var].values
+                element_mask = mask_val[orig_idx].astype(np.int32)
+                mask_arg = element_mask
+
+            mesh.add_elements(
+                len(element_ids),
+                element_ids.astype(np.int32),
+                element_types.astype(np.int32),
+                element_conn.astype(np.int32),
+                element_mask=mask_arg,
+            )
+
+            return mesh, provenance, orig_idx
+
         if method not in ["nearest_s2d", "nearest_d2s"]:
             raise NotImplementedError(
-                f"Method '{method}' is not yet supported for unstructured grids."
+                f"Method '{method}' is not yet supported for unstructured grids. "
+                "Use 'nearest_s2d', 'nearest_d2s' or 'conservative' (requires mesh info)."
             )
         locstream = esmpy.LocStream(shape[0], coord_sys=esmpy.CoordSys.SPH_DEG)
         locstream["ESMF:Lon"] = _to_degrees(lon).values.astype(np.float64)
@@ -225,7 +383,7 @@ def _create_esmf_grid(
         if mask_var and mask_var in ds:
             locstream["ESMF:Mask"] = ds[mask_var].values.astype(np.int32)
 
-        return locstream, provenance
+        return locstream, provenance, None
     else:
         lon_f = _to_degrees(lon).values.T
         lat_f = _to_degrees(lat).values.T
@@ -300,7 +458,7 @@ def _create_esmf_grid(
             grid.get_item(esmpy.GridItem.MASK, staggerloc=esmpy.StaggerLoc.CENTER)[
                 ...
             ] = ds[mask_var].values.T.astype(np.int32)
-        return grid, provenance
+        return grid, provenance, None
 
 
 def _compute_chunk_weights(
@@ -357,15 +515,27 @@ def _compute_chunk_weights(
         # We use id(source_ds) as a key. Dask ensures the same object is reused on a worker.
         src_cache_key = (id(source_ds), method, periodic, mask_var)
         if src_cache_key in _WORKER_CACHE:
-            src_field = _WORKER_CACHE[src_cache_key]
+            src_field, src_orig_idx = _WORKER_CACHE[src_cache_key]
         else:
-            src_obj, _ = _create_esmf_grid(source_ds, method, periodic, mask_var)
-            src_field = esmpy.Field(src_obj, name="src")
-            _WORKER_CACHE[src_cache_key] = src_field
+            src_obj, _, src_orig_idx = _create_esmf_grid(
+                source_ds, method, periodic, mask_var
+            )
+            if isinstance(src_obj, esmpy.Mesh) and method == "conservative":
+                src_field = esmpy.Field(
+                    src_obj, name="src", meshloc=esmpy.MeshLoc.ELEMENT
+                )
+            else:
+                src_field = esmpy.Field(src_obj, name="src")
+            _WORKER_CACHE[src_cache_key] = (src_field, src_orig_idx)
 
         # 2. Create target ESMF object (chunk is small, no need to cache)
-        dst_obj, _ = _create_esmf_grid(chunk_ds, method, periodic=False, mask_var=None)
-        dst_field = esmpy.Field(dst_obj, name="dst")
+        dst_obj, _, dst_orig_idx = _create_esmf_grid(
+            chunk_ds, method, periodic=False, mask_var=None
+        )
+        if isinstance(dst_obj, esmpy.Mesh) and method == "conservative":
+            dst_field = esmpy.Field(dst_obj, name="dst", meshloc=esmpy.MeshLoc.ELEMENT)
+        else:
+            dst_field = esmpy.Field(dst_obj, name="dst")
 
         # 3. Setup regridding parameters
         method_map = {
@@ -393,6 +563,9 @@ def _compute_chunk_weights(
         if mask_var:
             regrid_kwargs["src_mask_values"] = np.array([0], dtype=np.int32)
 
+        if method == "conservative":
+            regrid_kwargs["norm_type"] = esmpy.NormType.FRACAREA
+
         # 4. Generate weights
         regrid = esmpy.Regrid(src_field, dst_field, **regrid_kwargs)
         weights = regrid.get_weights_dict(deep_copy=True)
@@ -415,8 +588,17 @@ def _compute_chunk_weights(
                     + (np.arange(n1) + i1_start)
                 ).flatten()
 
-        rows = global_indices[weights["row_dst"] - 1]
-        cols = weights["col_src"] - 1
+        row_dst = weights["row_dst"] - 1
+        col_src = weights["col_src"] - 1
+
+        if dst_orig_idx is not None:
+            row_dst = dst_orig_idx[row_dst]
+
+        if src_orig_idx is not None:
+            col_src = src_orig_idx[col_src]
+
+        rows = global_indices[row_dst]
+        cols = col_src
         data = weights["weights"]
 
         return rows, cols, data, None
@@ -888,7 +1070,9 @@ class Regridder:
 
     def _create_esmf_object(
         self, ds: xr.Dataset, is_source: bool = True
-    ) -> Tuple[Union[esmpy.Grid, esmpy.LocStream], list[str]]:
+    ) -> Tuple[
+        Union[esmpy.Grid, esmpy.LocStream, esmpy.Mesh], list[str], Optional[np.ndarray]
+    ]:
         """
         Creates an ESMF Grid or LocStream and updates internal metadata.
 
@@ -935,17 +1119,24 @@ class Regridder:
             return
 
         start_time = time.perf_counter()
-        src_obj, src_prov = self._create_esmf_object(
+        src_obj, src_prov, src_orig_idx = self._create_esmf_object(
             self.source_grid_ds, is_source=True
         )
-        dst_obj, dst_prov = self._create_esmf_object(
+        dst_obj, dst_prov, dst_orig_idx = self._create_esmf_object(
             self.target_grid_ds, is_source=False
         )
         self.provenance.extend(src_prov)
         self.provenance.extend(dst_prov)
 
-        src_field = esmpy.Field(src_obj, name="src")
-        dst_field = esmpy.Field(dst_obj, name="dst")
+        if isinstance(src_obj, esmpy.Mesh) and self.method == "conservative":
+            src_field = esmpy.Field(src_obj, name="src", meshloc=esmpy.MeshLoc.ELEMENT)
+        else:
+            src_field = esmpy.Field(src_obj, name="src")
+
+        if isinstance(dst_obj, esmpy.Mesh) and self.method == "conservative":
+            dst_field = esmpy.Field(dst_obj, name="dst", meshloc=esmpy.MeshLoc.ELEMENT)
+        else:
+            dst_field = esmpy.Field(dst_obj, name="dst")
 
         try:
             regrid_method = self.method_map[self.method]
@@ -969,6 +1160,9 @@ class Regridder:
         if self.mask_var and self.mask_var in self.source_grid_ds:
             regrid_kwargs["src_mask_values"] = np.array([0], dtype=np.int32)
 
+        if self.method == "conservative":
+            regrid_kwargs["norm_type"] = esmpy.NormType.FRACAREA
+
         # Build Regrid object
         regrid = esmpy.Regrid(src_field, dst_field, **regrid_kwargs)
 
@@ -982,6 +1176,15 @@ class Regridder:
             )
 
         weights = regrid.get_weights_dict(deep_copy=True)
+
+        # Map to original indices if Mesh was triangulated
+        row_dst = weights["row_dst"] - 1
+        col_src = weights["col_src"] - 1
+
+        if dst_orig_idx is not None:
+            row_dst = dst_orig_idx[row_dst]
+        if src_orig_idx is not None:
+            col_src = src_orig_idx[col_src]
 
         # Handle MPI gathering if multiple ranks are present
         pet_count = esmpy.pet_count()
@@ -997,9 +1200,27 @@ class Regridder:
 
                 if local_pet == 0:
                     # Concatenate all gathered weights
-                    rows = np.concatenate([w["row_dst"] for w in all_weights]) - 1
-                    cols = np.concatenate([w["col_src"] for w in all_weights]) - 1
-                    data = np.concatenate([w["weights"] for w in all_weights])
+                    rows = []
+                    cols = []
+                    data = []
+                    for i, w in enumerate(all_weights):
+                        r = w["row_dst"] - 1
+                        c = w["col_src"] - 1
+                        # Note: orig_idx is not easily gathered via ESMF weights dict
+                        # but here we are in serial-equivalent rank 0 gathering.
+                        # Actually, each rank might have different triangulation?
+                        # No, triangulation should be deterministic.
+                        if dst_orig_idx is not None:
+                            r = dst_orig_idx[r]
+                        if src_orig_idx is not None:
+                            c = src_orig_idx[c]
+                        rows.append(r)
+                        cols.append(c)
+                        data.append(w["weights"])
+
+                    rows = np.concatenate(rows)
+                    cols = np.concatenate(cols)
+                    data = np.concatenate(data)
                 else:
                     # Non-root ranks will have empty weight arrays to avoid duplicate computation.
                     # Only the root rank builds the full sparse matrix for Dask-based application.
@@ -1018,8 +1239,8 @@ class Regridder:
                 cols = weights["col_src"] - 1
                 data = weights["weights"]
         else:
-            rows = weights["row_dst"] - 1
-            cols = weights["col_src"] - 1
+            rows = row_dst
+            cols = col_src
             data = weights["weights"]
 
         n_src = int(np.prod(self._shape_source))

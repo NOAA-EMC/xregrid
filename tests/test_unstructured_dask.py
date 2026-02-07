@@ -24,6 +24,12 @@ def setup_driver_mock():
     mock_esmpy.ExtrapMethod.NEAREST_STOD = 0
     mock_esmpy.ExtrapMethod.NEAREST_IDAVG = 1
     mock_esmpy.ExtrapMethod.CREEP_FILL = 2
+    mock_esmpy.MeshLoc.NODE = 0
+    mock_esmpy.MeshLoc.ELEMENT = 1
+    mock_esmpy.MeshElemType.TRI = 1
+    mock_esmpy.MeshElemType.QUAD = 2
+    mock_esmpy.NormType.FRACAREA = 0
+    mock_esmpy.NormType.DSTAREA = 1
     mock_esmpy.Manager.return_value = MagicMock()
     mock_esmpy.pet_count.return_value = 1
     mock_esmpy.local_pet.return_value = 0
@@ -45,6 +51,18 @@ def setup_driver_mock():
 
     mock_esmpy.Grid = Grid
     mock_esmpy.LocStream = LocStream
+
+    class Mesh:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def add_nodes(self, *args, **kwargs):
+            pass
+
+        def add_elements(self, *args, **kwargs):
+            pass
+
+    mock_esmpy.Mesh = Mesh
     mock_esmpy.Field.return_value = MagicMock()
     mock_regrid = MagicMock()
     mock_regrid.get_factors.return_value = (np.array([0]), np.array([0]))
@@ -67,9 +85,10 @@ def setup_worker_mock():
     """Setup esmpy mock for Dask workers."""
     import sys
     from unittest.mock import MagicMock
+
     import numpy as np
 
-    if "esmpy" in sys.modules and not isinstance(sys.modules["esmpy"], MagicMock):
+    if "esmpy" in sys.modules and isinstance(sys.modules["esmpy"], MagicMock):
         return
 
     mock_esmpy = MagicMock()
@@ -86,6 +105,12 @@ def setup_worker_mock():
     mock_esmpy.ExtrapMethod.NEAREST_STOD = 0
     mock_esmpy.ExtrapMethod.NEAREST_IDAVG = 1
     mock_esmpy.ExtrapMethod.CREEP_FILL = 2
+    mock_esmpy.MeshLoc.NODE = 0
+    mock_esmpy.MeshLoc.ELEMENT = 1
+    mock_esmpy.MeshElemType.TRI = 1
+    mock_esmpy.MeshElemType.QUAD = 2
+    mock_esmpy.NormType.FRACAREA = 0
+    mock_esmpy.NormType.DSTAREA = 1
     mock_esmpy.Manager.return_value = MagicMock()
     mock_esmpy.pet_count.return_value = 1
     mock_esmpy.local_pet.return_value = 0
@@ -105,8 +130,19 @@ def setup_worker_mock():
         def __setitem__(self, key, value):
             self.items[key] = value
 
+    class Mesh:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def add_nodes(self, *args, **kwargs):
+            pass
+
+        def add_elements(self, *args, **kwargs):
+            pass
+
     mock_esmpy.Grid = Grid
     mock_esmpy.LocStream = LocStream
+    mock_esmpy.Mesh = Mesh
     mock_esmpy.Field.return_value = MagicMock()
     mock_regrid = MagicMock()
     mock_regrid.get_factors.return_value = (np.array([0]), np.array([0]))
