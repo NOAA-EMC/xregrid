@@ -1,18 +1,14 @@
-import pytest
-import xarray as xr
-import numpy as np
-import dask.distributed
 import sys
 from unittest.mock import MagicMock
 
+import dask.distributed
+import numpy as np
+import pytest
+import xarray as xr
 
 # Setup mock for the driver process
 def setup_driver_mock():
-    import sys
-    from unittest.mock import MagicMock
-    import numpy as np
-
-    if "esmpy" in sys.modules and not isinstance(sys.modules["esmpy"], MagicMock):
+    if "esmpy" in sys.modules and isinstance(sys.modules["esmpy"], MagicMock):
         return
 
     mock_esmpy = MagicMock()
@@ -64,16 +60,17 @@ def setup_driver_mock():
 
 setup_driver_mock()
 
-from xregrid import Regridder, create_global_grid, create_mesh_from_coords
+from xregrid import Regridder, create_global_grid, create_mesh_from_coords  # noqa: E402
 
 
 def setup_worker_mock():
     """Setup esmpy mock for Dask workers."""
     import sys
     from unittest.mock import MagicMock
+
     import numpy as np
 
-    if "esmpy" in sys.modules and not isinstance(sys.modules["esmpy"], MagicMock):
+    if "esmpy" in sys.modules and isinstance(sys.modules["esmpy"], MagicMock):
         return
 
     mock_esmpy = MagicMock()
