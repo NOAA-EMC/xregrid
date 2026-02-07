@@ -1,0 +1,7 @@
+20260207 113443.595 ERROR            PET0 /home/conda/feedstock_root/build_artifacts/esmf_1767773669636/work/src/Infrastructure/Mesh/src/ESMCI_Mesh_Glue.C:3563 ESMCI_getlocalelemcoords() Arguments are incompatible  -  - elem_coordinates not found in Mesh
+20260207 113443.595 ERROR            PET0 /home/conda/feedstock_root/build_artifacts/esmf_1767773669636/work/src/Infrastructure/Mesh/src/ESMCI_Mesh_Glue.C:3578 ESMCI_getlocalelemcoords() Arguments are incompatible  - Internal subroutine call returned Error
+20260207 113443.595 ERROR            PET0 ESMC_Mesh.C:345 ESMC_MeshGetElemCoord() Arguments are incompatible  - Internal subroutine call returned Error
+20260207 113443.596 ERROR            PET0 /home/conda/feedstock_root/build_artifacts/esmf_1767773669636/work/src/Infrastructure/Mesh/src/ESMCI_Mesh_Glue.C:3563 ESMCI_getlocalelemcoords() Arguments are incompatible  -  - elem_coordinates not found in Mesh
+20260207 113443.596 ERROR            PET0 /home/conda/feedstock_root/build_artifacts/esmf_1767773669636/work/src/Infrastructure/Mesh/src/ESMCI_Mesh_Glue.C:3578 ESMCI_getlocalelemcoords() Arguments are incompatible  - Internal subroutine call returned Error
+20260207 113443.596 ERROR            PET0 ESMC_Mesh.C:345 ESMC_MeshGetElemCoord() Arguments are incompatible  - Internal subroutine call returned Error
+20260207 113443.597 INFO             PET0  Finalizing ESMF

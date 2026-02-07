@@ -247,8 +247,9 @@ def _get_unstructured_mesh_info(
             for i in range(conn_raw.shape[0]):
                 valid_conn = conn_raw[i, :]
                 valid_conn = valid_conn[valid_conn != fill_value]
-                # ESMF Mesh expects 1-based indexing
-                valid_conn = valid_conn - start_index + 1
+                # ESMF Mesh expects 0-based indices into the node list in Python
+                # which it then converts to 1-based indices for the C layer.
+                valid_conn = valid_conn - start_index
 
                 for j in range(1, len(valid_conn) - 1):
                     element_conn.extend(
@@ -285,13 +286,16 @@ def _get_unstructured_mesh_info(
         element_ids = []
         orig_cell_index = []
 
-        # MPAS is 1-based indexing
+        # MPAS is 1-based indexing for vertex IDs
         for i in range(len(n_edges)):
             valid_conn = conn_raw[i, : n_edges[i]]
             # Triangulate polygon if it's not a triangle or quad
-            # Actually, we can just triangulate everything into triangles for simplicity
+            # Actually, we can just triangulate everything into triangles for simplicity.
+            # ESMPy Mesh expects 0-based indices into the node list in Python.
             for j in range(1, len(valid_conn) - 1):
-                element_conn.extend([valid_conn[0], valid_conn[j], valid_conn[j + 1]])
+                element_conn.extend(
+                    [valid_conn[0] - 1, valid_conn[j] - 1, valid_conn[j + 1] - 1]
+                )
                 element_types.append(esmpy.MeshElemType.TRI)
                 element_ids.append(len(element_types))
                 orig_cell_index.append(i)
@@ -349,8 +353,8 @@ def _get_unstructured_mesh_info(
             for i in range(conn_raw.shape[0]):
                 valid_conn = conn_raw[i, :]
                 valid_conn = valid_conn[valid_conn != fill_value]
-                # ESMF Mesh expects 1-based indexing
-                valid_conn = valid_conn - start_index + 1
+                # ESMF Mesh expects 0-based indices into the node list in Python
+                valid_conn = valid_conn - start_index
 
                 for j in range(1, len(valid_conn) - 1):
                     element_conn.extend(
