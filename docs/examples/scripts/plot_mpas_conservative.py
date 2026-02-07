@@ -14,36 +14,58 @@ XRegrid automatically handles:
 - Weight aggregation back to original cells
 """
 
-import xarray as xr
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import xarray as xr
+
 from xregrid import Regridder, create_global_grid
 
 # 1. Create a synthetic MPAS-like dataset
-# We define a small mesh with nodes and cells
-nCells = 200
-nVertices = 400
+# We'll create a small 10x10 regular mesh but represent it as an unstructured MPAS grid.
+# This ensures a valid, non-degenerate mesh for conservative regridding.
+n_lon, n_lat = 12, 10
+lon_edges = np.linspace(0, 360, n_lon + 1)
+lat_edges = np.linspace(-90, 90, n_lat + 1)
+lon_centers = 0.5 * (lon_edges[:-1] + lon_edges[1:])
+lat_centers = 0.5 * (lat_edges[:-1] + lat_edges[1:])
+lon_mesh, lat_mesh = np.meshgrid(lon_centers, lat_centers)
+lon_v_mesh, lat_v_mesh = np.meshgrid(lon_edges, lat_edges)
 
-# Random cell centers
-latCell = np.radians(np.random.uniform(-90, 90, nCells))
-lonCell = np.radians(np.random.uniform(0, 360, nCells))
+nCells = n_lon * n_lat
+nVertices = (n_lon + 1) * (n_lat + 1)
 
-# Random vertices
-latVertex = np.radians(np.random.uniform(-90, 90, nVertices))
-lonVertex = np.radians(np.random.uniform(0, 360, nVertices))
+# Map (j, i) to vertex index (1-based for MPAS)
+v_idx = np.arange(1, nVertices + 1).reshape(n_lat + 1, n_lon + 1)
 
-# Mock connectivity (each cell has 6 vertices)
-verticesOnCell = np.random.randint(1, nVertices + 1, (nCells, 6))
+verticesOnCell = np.zeros((nCells, 4), dtype=int)
+for j in range(n_lat):
+    for i in range(n_lon):
+        idx = j * n_lon + i
+        # Counter-clockwise: (j, i), (j, i+1), (j+1, i+1), (j+1, i)
+        verticesOnCell[idx] = [
+            v_idx[j, i],
+            v_idx[j, i + 1],
+            v_idx[j + 1, i + 1],
+            v_idx[j + 1, i],
+        ]
 
 ds_mpas = xr.Dataset(
     {"data": (["nCells"], np.random.rand(nCells))},
     coords={
-        "latCell": (["nCells"], latCell, {"units": "radians"}),
-        "lonCell": (["nCells"], lonCell, {"units": "rad"}),
-        "latVertex": (["nVertices"], latVertex, {"units": "radians"}),
-        "lonVertex": (["nVertices"], lonVertex, {"units": "rad"}),
+        "latCell": (["nCells"], np.radians(lat_mesh.flatten()), {"units": "radians"}),
+        "lonCell": (["nCells"], np.radians(lon_mesh.flatten()), {"units": "rad"}),
+        "latVertex": (
+            ["nVertices"],
+            np.radians(lat_v_mesh.flatten()),
+            {"units": "radians"},
+        ),
+        "lonVertex": (
+            ["nVertices"],
+            np.radians(lon_v_mesh.flatten()),
+            {"units": "rad"},
+        ),
         "verticesOnCell": (["nCells", "maxNodes"], verticesOnCell),
-        "nEdgesOnCell": (["nCells"], np.full(nCells, 6)),
+        "nEdgesOnCell": (["nCells"], np.full(nCells, 4)),
     },
 )
 

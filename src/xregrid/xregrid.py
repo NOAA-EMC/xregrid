@@ -59,6 +59,35 @@ def _get_mesh_info(
     ValueError
         If coordinates have invalid dimensionality.
     """
+    # Handle uxarray objects
+    if hasattr(ds, "uxgrid"):
+        uxgrid = getattr(ds, "uxgrid")
+        # Prefer coordinates that match data variables if present
+        try:
+            # Check if data variable is on faces
+            use_faces = False
+            if hasattr(ds, "data_vars") and len(ds.data_vars) > 0:
+                first_var = list(ds.data_vars.values())[0]
+                if "n_face" in first_var.dims or "nFaces" in first_var.dims:
+                    use_faces = True
+
+            if (
+                use_faces
+                and hasattr(uxgrid, "face_lat")
+                and hasattr(uxgrid, "face_lon")
+            ):
+                lat = uxgrid.face_lat
+                lon = uxgrid.face_lon
+            else:
+                lat = uxgrid.node_lat
+                lon = uxgrid.node_lon
+
+            # If they share same dim, it's unstructured
+            if lat.dims == lon.dims:
+                return lon, lat, lat.shape, lat.dims, True
+        except (AttributeError, KeyError):
+            pass
+
     try:
         lat = ds.cf["latitude"]
         lon = ds.cf["longitude"]
@@ -198,6 +227,48 @@ def _get_unstructured_mesh_info(
 
     Supports MPAS and UGRID conventions.
     """
+    # 0. Detect uxarray
+    if hasattr(ds, "uxgrid"):
+        uxgrid = getattr(ds, "uxgrid")
+        try:
+            node_lat = _to_degrees(uxgrid.node_lat).values
+            node_lon = _to_degrees(uxgrid.node_lon).values
+            conn_raw = uxgrid.face_node_connectivity.values
+            start_index = uxgrid.face_node_connectivity.attrs.get("start_index", 0)
+            fill_value = uxgrid.face_node_connectivity.attrs.get(
+                "_FillValue", -9223372036854775808
+            )
+
+            element_conn = []
+            element_types = []
+            element_ids = []
+            orig_cell_index = []
+
+            for i in range(conn_raw.shape[0]):
+                valid_conn = conn_raw[i, :]
+                valid_conn = valid_conn[valid_conn != fill_value]
+                # ESMF Mesh expects 1-based indexing
+                valid_conn = valid_conn - start_index + 1
+
+                for j in range(1, len(valid_conn) - 1):
+                    element_conn.extend(
+                        [valid_conn[0], valid_conn[j], valid_conn[j + 1]]
+                    )
+                    element_types.append(esmpy.MeshElemType.TRI)
+                    element_ids.append(len(element_types))
+                    orig_cell_index.append(i)
+
+            return (
+                node_lon,
+                node_lat,
+                np.array(element_conn),
+                np.array(element_types),
+                np.array(element_ids),
+                np.array(orig_cell_index),
+            )
+        except (AttributeError, KeyError):
+            pass
+
     # 1. Detect MPAS
     if "verticesOnCell" in ds and "latVertex" in ds and "lonVertex" in ds:
         node_lat = _to_degrees(ds["latVertex"]).values
@@ -1739,7 +1810,7 @@ class Regridder:
 
     def __call__(
         self,
-        obj: Union[xr.DataArray, xr.Dataset],
+        obj: Union[xr.DataArray, xr.Dataset, Any],
         skipna: Optional[bool] = None,
         na_thres: Optional[float] = None,
     ) -> Union[xr.DataArray, xr.Dataset]:
@@ -1774,6 +1845,12 @@ class Regridder:
             return self._regrid_dataset(obj, skipna=skipna, na_thres=na_thres)
         elif isinstance(obj, xr.DataArray):
             return self._regrid_dataarray(obj, skipna=skipna, na_thres=na_thres)
+        # Handle uxarray objects if they don't pass isinstance(xr.Dataset)
+        elif hasattr(obj, "uxgrid"):
+            if hasattr(obj, "data_vars"):
+                return self._regrid_dataset(obj, skipna=skipna, na_thres=na_thres)
+            else:
+                return self._regrid_dataarray(obj, skipna=skipna, na_thres=na_thres)
         else:
             raise TypeError("Input must be an xarray.DataArray or xarray.Dataset.")
 
@@ -1869,9 +1946,25 @@ class Regridder:
                         )
                 else:
                     # Unstructured: just one dimension
-                    da_in = da_in.cf.rename(
-                        {da_in.cf["latitude"].dims[0]: self._dims_source[0]}
-                    )
+                    try:
+                        da_in = da_in.cf.rename(
+                            {da_in.cf["latitude"].dims[0]: self._dims_source[0]}
+                        )
+                    except (KeyError, AttributeError):
+                        # Handle uxarray
+                        if hasattr(da_in, "uxgrid"):
+                            # Find the unstructured dimension
+                            for d in da_in.dims:
+                                if d in [
+                                    "n_face",
+                                    "n_node",
+                                    "n_edge",
+                                    "nCells",
+                                    "nVertices",
+                                    "nEdges",
+                                ]:
+                                    da_in = da_in.rename({d: self._dims_source[0]})
+                                    break
             except (KeyError, AttributeError, ValueError):
                 # Fallback to original dims; xr.apply_ufunc will raise if they don't match
                 pass

@@ -1,13 +1,14 @@
 # Unstructured Grids
 
-XRegrid provides robust support for unstructured grids, including those used by models like MPAS and ICON, or datasets following UGRID conventions.
+XRegrid provides robust support for unstructured grids, including those used by models like MPAS and ICON, or datasets following UGRID conventions. It also provides native integration with **uxarray**.
 
 ## Supported Formats
 
 XRegrid automatically detects unstructured grids by looking for:
 - Standard 1D coordinates sharing a dimension (e.g., `lat(nCells)`, `lon(nCells)`).
-- MPAS-specific coordinate names: `latCell`, `lonCell`, `latVertex`, `lonVertex`.
-- UGRID-specific coordinate names: `lat_node`, `lon_node`.
+- **MPAS-specific** coordinate names: `latCell`, `lonCell`, `latVertex`, `lonVertex`.
+- **UGRID-specific** coordinate names: `lat_node`, `lon_node`.
+- **uxarray** objects: Automatically uses the underlying `.uxgrid` for coordinates and connectivity.
 
 ## Regridding Methods
 
@@ -19,6 +20,7 @@ XRegrid now supports **conservative regridding** for unstructured grids by autom
 
 - **MPAS**: Requires `verticesOnCell` and vertex coordinates (`latVertex`, `lonVertex`).
 - **UGRID**: Requires `face_node_connectivity` with a `cf_role="face_node_connectivity"` attribute.
+- **uxarray**: Automatically extracts connectivity from the `UxDataset` or `UxDataArray`.
 
 XRegrid automatically triangulates these polygons to ensure compatibility with ESMF's mesh requirements while correctly aggregating weights back to the original cells.
 

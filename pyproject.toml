@@ -36,6 +36,7 @@ viz = [
 full = [
     "xregrid[test,viz]",
     "xesmf",
+    "uxarray",
 ]
 
 [tool.setuptools.packages.find]
