@@ -209,7 +209,10 @@ def test_recursion_protection_naming():
     # Create a DataArray with a coordinate that points to itself or another regriddable coord
     data = np.random.rand(6, 12)
     da_in = xr.DataArray(
-        data, dims=("lat", "lon"), coords={"lat": src.lat, "lon": src.lon}, name="test_da"
+        data,
+        dims=("lat", "lon"),
+        coords={"lat": src.lat, "lon": src.lon},
+        name="test_da",
     )
 
     # Add an auxiliary spatial coordinate
@@ -246,7 +249,6 @@ def test_plot_diagnostics_interactive_smoke():
     try:
         from xregrid.viz import plot_diagnostics_interactive
 
-        import holoviews as hv
         import hvplot.xarray  # noqa: F401
     except ImportError:
         pytest.skip("hvplot or holoviews not installed")

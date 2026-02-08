@@ -413,7 +413,10 @@ def plot_diagnostics_interactive(
     )
 
     p_mask = ds_diag.unmapped_mask.hvplot(
-        rasterize=rasterize, cmap=mask_cmap, title="Unmapped Mask (1=Unmapped)", **kwargs
+        rasterize=rasterize,
+        cmap=mask_cmap,
+        title="Unmapped Mask (1=Unmapped)",
+        **kwargs,
     )
 
     layout = (p_sum + p_mask).cols(2)
