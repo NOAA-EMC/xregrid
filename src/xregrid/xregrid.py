@@ -160,24 +160,18 @@ def _bounds_to_vertices(b: xr.DataArray) -> np.ndarray:
     np.ndarray
         The vertex coordinate array.
     """
-    # ESMF requires NumPy arrays for grid creation. While we use np.asarray(b.data)
-    # to be backend-agnostic, this WILL trigger a compute for Dask-backed coordinates.
-    # We call this only for small grid coordinate chunks or on the driver when
-    # serial weight generation is required.
-    # (Aero Protocol: Backend Agnostic Interface)
     if b.ndim == 2 and b.shape[-1] == 2:
-        vals = np.asarray(b.data)
-        return np.concatenate([vals[:, 0], vals[-1:, 1]])
+        return np.concatenate([b.values[:, 0], b.values[-1:, 1]])
     elif b.ndim == 3 and b.shape[-1] == 4:
         y_size, x_size, _ = b.shape
-        vals = np.asarray(b.data)
+        vals = b.values
         res = np.empty((y_size + 1, x_size + 1))
         res[:-1, :-1] = vals[:, :, 0]
         res[:-1, -1] = vals[:, -1, 1]
         res[-1, -1] = vals[-1, -1, 2]
         res[-1, :-1] = vals[-1, :, 3]
         return res
-    return np.asarray(b.data)
+    return b.values
 
 
 def _get_grid_bounds(
@@ -204,12 +198,13 @@ def _get_grid_bounds(
         return _bounds_to_vertices(lat_b_da), _bounds_to_vertices(lon_b_da)
     except (KeyError, AttributeError, ValueError):
         if "lat_b" in ds and "lon_b" in ds:
-            lat_b = ds["lat_b"]
-            lon_b = ds["lon_b"]
-            # Convert to numpy only when needed for ESMF. This triggers compute for lazy data.
-            lat_b_vals = np.asarray(lat_b.data) if hasattr(lat_b, "data") else lat_b
-            lon_b_vals = np.asarray(lon_b.data) if hasattr(lon_b, "data") else lon_b
-            return lat_b_vals, lon_b_vals
+            lat_b = (
+                ds["lat_b"].values if hasattr(ds["lat_b"], "values") else ds["lat_b"]
+            )
+            lon_b = (
+                ds["lon_b"].values if hasattr(ds["lon_b"], "values") else ds["lon_b"]
+            )
+            return lat_b, lon_b
     return None, None
 
 
@@ -391,6 +386,7 @@ def _create_esmf_grid(
     method: str,
     periodic: bool = False,
     mask_var: Optional[str] = None,
+    coord_sys: Optional[esmpy.CoordSys] = None,
 ) -> Tuple[
     Union[esmpy.Grid, esmpy.LocStream, esmpy.Mesh], list[str], Optional[np.ndarray]
 ]:
@@ -420,6 +416,9 @@ def _create_esmf_grid(
     orig_idx = None
 
     if is_unstructured:
+        if coord_sys is None:
+            coord_sys = esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART
+
         if method == "conservative":
             # Use Mesh for conservative regridding
             node_lon, node_lat, element_conn, element_types, element_ids, orig_idx = (
@@ -429,7 +428,7 @@ def _create_esmf_grid(
             mesh = esmpy.Mesh(
                 parametric_dim=2,
                 spatial_dim=2,
-                coord_sys=esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART,
+                coord_sys=coord_sys,
             )
 
             node_count = len(node_lon)
@@ -467,20 +466,21 @@ def _create_esmf_grid(
                 f"Method '{method}' is not yet supported for unstructured grids. "
                 "Use 'nearest_s2d', 'nearest_d2s' or 'conservative' (requires mesh info)."
             )
-        locstream = esmpy.LocStream(
-            shape[0],
-            coord_sys=esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART,
-        )
-        locstream["ESMF:Lon"] = _to_degrees(lon).values.astype(np.float64)
-        locstream["ESMF:Lat"] = _to_degrees(lat).values.astype(np.float64)
+        locstream = esmpy.LocStream(shape[0], coord_sys=coord_sys)
+        if coord_sys == esmpy.CoordSys.CART:
+            locstream["ESMF:X"] = _to_degrees(lon).values.astype(np.float64)
+            locstream["ESMF:Y"] = _to_degrees(lat).values.astype(np.float64)
+        else:
+            locstream["ESMF:Lon"] = _to_degrees(lon).values.astype(np.float64)
+            locstream["ESMF:Lat"] = _to_degrees(lat).values.astype(np.float64)
 
         if mask_var and mask_var in ds:
-            locstream["ESMF:Mask"] = np.asarray(ds[mask_var].data).astype(np.int32)
+            locstream["ESMF:Mask"] = ds[mask_var].values.astype(np.int32)
 
         return locstream, provenance, None
     else:
-        lon_f = np.asarray(_to_degrees(lon).data).T
-        lat_f = np.asarray(_to_degrees(lat).data).T
+        lon_f = _to_degrees(lon).values.T
+        lat_f = _to_degrees(lat).values.T
         shape_f = lon_f.shape
 
         num_peri_dims = 1 if periodic else None
@@ -511,9 +511,10 @@ def _create_esmf_grid(
         if has_bounds:
             staggerlocs.append(esmpy.StaggerLoc.CORNER)
 
-        # Use CART for regional grids to avoid boundary chord issues (Aero Protocol: Robustness)
-        # SPH_DEG is used only for periodic/global grids or unstructured meshes.
-        coord_sys = esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART
+        if coord_sys is None:
+            # Use CART for regional grids to avoid boundary chord issues (Aero Protocol: Robustness)
+            # SPH_DEG is used only for periodic/global grids or unstructured meshes.
+            coord_sys = esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART
 
         grid = esmpy.Grid(
             np.array(shape_f),
@@ -555,7 +556,7 @@ def _create_esmf_grid(
             grid.add_item(esmpy.GridItem.MASK, staggerloc=esmpy.StaggerLoc.CENTER)
             grid.get_item(esmpy.GridItem.MASK, staggerloc=esmpy.StaggerLoc.CENTER)[
                 ...
-            ] = np.asarray(ds[mask_var].data).T.astype(np.int32)
+            ] = ds[mask_var].values.T.astype(np.int32)
         return grid, provenance, None
 
 
@@ -568,6 +569,7 @@ def _compute_chunk_weights(
     extrap_dist_exponent: float = 2.0,
     mask_var: Optional[str] = None,
     periodic: bool = False,
+    coord_sys: Optional[esmpy.CoordSys] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[str]]:
     """
     Worker function to compute weights for a specific chunk of the target grid.
@@ -611,12 +613,12 @@ def _compute_chunk_weights(
 
         # 1. Get or create source ESMF Field
         # We use id(source_ds) as a key. Dask ensures the same object is reused on a worker.
-        src_cache_key = (id(source_ds), method, periodic, mask_var)
+        src_cache_key = (id(source_ds), method, periodic, mask_var, coord_sys)
         if src_cache_key in _WORKER_CACHE:
             src_field, src_orig_idx = _WORKER_CACHE[src_cache_key]
         else:
             src_obj, _, src_orig_idx = _create_esmf_grid(
-                source_ds, method, periodic, mask_var
+                source_ds, method, periodic, mask_var, coord_sys=coord_sys
             )
             if isinstance(src_obj, esmpy.Mesh) and method == "conservative":
                 src_field = esmpy.Field(
@@ -628,7 +630,7 @@ def _compute_chunk_weights(
 
         # 2. Create target ESMF object (chunk is small, no need to cache)
         dst_obj, _, dst_orig_idx = _create_esmf_grid(
-            chunk_ds, method, periodic=False, mask_var=None
+            chunk_ds, method, periodic=False, mask_var=None, coord_sys=coord_sys
         )
         if isinstance(dst_obj, esmpy.Mesh) and method == "conservative":
             dst_field = esmpy.Field(dst_obj, name="dst", meshloc=esmpy.MeshLoc.ELEMENT)
@@ -1006,6 +1008,9 @@ class Regridder:
         self.extrap_method = extrap_method
         self.extrap_dist_exponent = extrap_dist_exponent
 
+        # Determine coordinate system for consistency (Aero Protocol: Robustness)
+        self._coord_sys = esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART
+
         # Robust coordinate handling: internally sort coordinates to be ascending
         # to ensure ESMF weight generation is stable and avoid boundary issues.
         # (Aero Protocol: User doesn't have to worry about monotonicity)
@@ -1094,23 +1099,32 @@ class Regridder:
         was_sorted = False
         try:
             # Only for rectilinear 1D coordinates
-            lat_dim = ds.cf["latitude"].dims[0]
-            lon_dim = ds.cf["longitude"].dims[0]
+            lat_da = ds.cf["latitude"]
+            lon_da = ds.cf["longitude"]
 
-            if ds[lat_dim].ndim == 1 and ds[lon_dim].ndim == 1:
-                # Check if descending or non-monotonic
-                lat_vals = ds[lat_dim].values
-                lon_vals = ds[lon_dim].values
+            # Must be 1D and not shared (unstructured grids share dimensions)
+            if (
+                lat_da.ndim == 1
+                and lon_da.ndim == 1
+                and lat_da.dims[0] != lon_da.dims[0]
+            ):
+                lat_dim = lat_da.dims[0]
+                lon_dim = lon_da.dims[0]
 
-                needs_sort = False
-                if not (
-                    np.all(np.diff(lat_vals) > 0) and np.all(np.diff(lon_vals) > 0)
+                # Only sort if dimension coordinates are numeric (Aero Protocol: Robustness)
+                if np.issubdtype(ds[lat_dim].dtype, np.number) and np.issubdtype(
+                    ds[lon_dim].dtype, np.number
                 ):
-                    needs_sort = True
+                    lat_vals = ds[lat_dim].values
+                    lon_vals = ds[lon_dim].values
 
-                if needs_sort:
-                    ds = ds.sortby([lat_dim, lon_dim])
-                    was_sorted = True
+                    # Check if already ascending
+                    is_lat_asc = np.all(np.diff(lat_vals) > 0)
+                    is_lon_asc = np.all(np.diff(lon_vals) > 0)
+
+                    if not (is_lat_asc and is_lon_asc):
+                        ds = ds.sortby([lat_dim, lon_dim])
+                        was_sorted = True
         except (KeyError, AttributeError, ValueError):
             pass
         return ds, was_sorted
@@ -1237,6 +1251,7 @@ class Regridder:
             self.method,
             periodic=self.periodic if is_source else False,
             mask_var=self.mask_var if is_source else None,
+            coord_sys=self._coord_sys,
         )
 
     def _generate_weights(self) -> None:
@@ -1468,6 +1483,7 @@ class Regridder:
                     self.extrap_dist_exponent,
                     self.mask_var,
                     self.periodic,
+                    coord_sys=self._coord_sys,
                 )
                 futures.append(future)
         else:
@@ -1522,6 +1538,7 @@ class Regridder:
                         self.extrap_dist_exponent,
                         self.mask_var,
                         self.periodic,
+                        coord_sys=self._coord_sys,
                     )
                     futures.append(future)
 
@@ -1931,7 +1948,7 @@ class Regridder:
         self,
         da_in: xr.DataArray,
         update_history_attr: bool = True,
-        _processed_ids: Optional[set[int]] = None,
+        _processed_coords: Optional[set[str]] = None,
         skipna: Optional[bool] = None,
         na_thres: Optional[float] = None,
     ) -> xr.DataArray:
@@ -1944,8 +1961,8 @@ class Regridder:
             The input DataArray.
         update_history_attr : bool, default True
             Whether to update the history attribute.
-        _processed_ids : set of int, optional
-            Set of object IDs already being processed to avoid infinite recursion.
+        _processed_coords : set of str, optional
+            Set of coordinate names already being processed to avoid infinite recursion.
         skipna : bool, optional
             Whether to handle NaNs. If None, uses initialization default.
         na_thres : float, optional
@@ -1956,8 +1973,8 @@ class Regridder:
         xr.DataArray
             The regridded DataArray.
         """
-        if _processed_ids is None:
-            _processed_ids = set()
+        if _processed_coords is None:
+            _processed_coords = set()
 
         if skipna is None:
             skipna = self.skipna
@@ -1973,40 +1990,22 @@ class Regridder:
         aux_coords_to_regrid = {}
 
         # Track this DataArray to prevent mutual recursion (Aero Protocol: Robustness)
-        _processed_ids.add(id(da_in))
-
-        # Also add names to prevent regridding different objects with the same name if they represent
-        # the same logical coordinate in a cycle (though IDs are more robust).
-        # We use a copy of the set for recursion to allow sibling coordinates to be regridded.
-        current_processed = _processed_ids.copy()
+        if da_in.name is not None:
+            _processed_coords.add(str(da_in.name))
 
         for c_name, c_da in da_in.coords.items():
-            # Avoid infinite recursion by checking ID and Name
-            # Xarray often recreates DataArray objects for coordinates, so ID might change,
-            # but the underlying variable/name is often a good proxy.
-            if id(c_da) in current_processed or c_name in _processed_ids:
-                continue
-
-            # Also skip if it's one of the source spatial dimensions (cannot be regridded)
-            if c_name in self._dims_source:
-                continue
-
-            # Skip if the coordinate name matches the DataArray name (prevents self-recursion)
-            if c_name == da_in.name:
+            # Avoid infinite recursion
+            if c_name in _processed_coords:
                 continue
 
             if c_name not in da_in.dims and all(
                 d in c_da.dims for d in self._dims_source
             ):
                 # This is an auxiliary spatial coordinate
-                # Add current coordinate name to prevent it from being regridded again in this branch
-                branch_processed = current_processed.copy()
-                branch_processed.add(c_name)
-
                 aux_coords_to_regrid[c_name] = self._regrid_dataarray(
                     c_da,
                     update_history_attr=False,
-                    _processed_ids=branch_processed,
+                    _processed_coords=_processed_coords,
                     skipna=skipna,
                     na_thres=na_thres,
                 )
@@ -2220,12 +2219,12 @@ class Regridder:
                     pass
 
             if is_regriddable:
-                # Initialize _processed_ids with the ID of the current variable
+                # Initialize _processed_coords with the name of the current variable
                 # to prevent it from trying to regrid itself if it appears as a coordinate.
                 regridded_items[name] = self._regrid_dataarray(
                     da,
                     update_history_attr=False,
-                    _processed_ids={id(da)},
+                    _processed_coords={name},
                     skipna=skipna,
                     na_thres=na_thres,
                 )
@@ -2249,7 +2248,7 @@ class Regridder:
                             c: self._regrid_dataarray(
                                 ds_in.coords[c],
                                 update_history_attr=False,
-                                _processed_ids={id(ds_in.coords[c])},
+                                _processed_coords={c},
                                 skipna=skipna,
                                 na_thres=na_thres,
                             )
@@ -2283,50 +2282,6 @@ class Regridder:
         update_history(out, history_msg)
 
         return out
-
-    def plot_weights(self, row_idx: int, **kwargs: Any) -> Any:
-        """
-        Visualize the contribution of source points to a specific destination point.
-
-        Parameters
-        ----------
-        row_idx : int
-            The flat index of the destination point.
-        **kwargs : Any
-            Additional arguments passed to viz.plot_static.
-
-        Returns
-        -------
-        Any
-            The plot object.
-        """
-        from .viz import plot_static
-
-        if self._weights_matrix is None:
-            raise RuntimeError("Weights have not been generated yet.")
-
-        # Get the row from the CSR matrix
-        row = self._weights_matrix.getrow(row_idx)
-        data = np.zeros(int(np.prod(self._shape_source)))
-        data[row.indices] = row.data
-
-        da_weights = xr.DataArray(
-            data.reshape(self._shape_source),
-            dims=self._dims_source,
-            coords={
-                c: self.source_grid_ds.coords[c]
-                for c in self.source_grid_ds.coords
-                if set(self.source_grid_ds.coords[c].dims).issubset(
-                    set(self._dims_source)
-                )
-            },
-            name="weights",
-        )
-
-        title = kwargs.pop(
-            "title", f"Source Weights for Destination Point {row_idx} ({self.method})"
-        )
-        return plot_static(da_weights, title=title, **kwargs)
 
 
 @xr.register_dataarray_accessor("regrid")

@@ -1,12 +1,12 @@
 import numpy as np
 import xarray as xr
-import pytest
 from xregrid import Regridder
+
 
 def test_descending_coordinates():
     """Test that regridding works correctly with descending coordinates (like air_temperature)."""
     # Create a source grid with descending latitude
-    lat = np.linspace(90, -90, 19) # 10 degree resolution
+    lat = np.linspace(90, -90, 19)  # 10 degree resolution
     lon = np.linspace(0, 350, 36)
     ds_src = xr.Dataset(
         coords={
@@ -15,11 +15,14 @@ def test_descending_coordinates():
         }
     )
     # Set data to lat values
-    ds_src["data"] = (["lat", "lon"], np.broadcast_to(lat[:, None], (len(lat), len(lon))))
+    ds_src["data"] = (
+        ["lat", "lon"],
+        np.broadcast_to(lat[:, None], (len(lat), len(lon))),
+    )
 
     # Target grid with ascending latitude
-    target_lat = np.linspace(-90, 90, 37) # 5 degree resolution
-    target_lon = np.linspace(0, 355, 72) # Includes out-of-bounds lon (355)
+    target_lat = np.linspace(-90, 90, 37)  # 5 degree resolution
+    target_lon = np.linspace(0, 355, 72)  # Includes out-of-bounds lon (355)
     ds_tgt = xr.Dataset(
         coords={
             "lat": (["lat"], target_lat, {"units": "degrees_north"}),
@@ -39,20 +42,24 @@ def test_descending_coordinates():
     # Verify unmapped points at the boundary
     assert np.all(res.sel(lon=355) == 0)
 
+
 def test_mixed_monotonicity():
     """Test that regridding works when only one coordinate is descending."""
     lat = np.linspace(-90, 90, 19)
-    lon = np.linspace(350, 0, 36) # descending lon
+    lon = np.linspace(350, 0, 36)  # descending lon
     ds_src = xr.Dataset(
         coords={
             "lat": (["lat"], lat, {"units": "degrees_north"}),
             "lon": (["lon"], lon, {"units": "degrees_east"}),
         }
     )
-    ds_src["data"] = (["lat", "lon"], np.broadcast_to(lon[None, :], (len(lat), len(lon))))
+    ds_src["data"] = (
+        ["lat", "lon"],
+        np.broadcast_to(lon[None, :], (len(lat), len(lon))),
+    )
 
     target_lat = np.linspace(-90, 90, 19)
-    target_lon = np.linspace(0, 350, 36) # ascending lon
+    target_lon = np.linspace(0, 350, 36)  # ascending lon
     ds_tgt = xr.Dataset(
         coords={
             "lat": (["lat"], target_lat, {"units": "degrees_north"}),
@@ -67,6 +74,7 @@ def test_mixed_monotonicity():
     assert np.all(np.diff(res.lon) > 0)
     # Data should match target_lon
     np.testing.assert_allclose(res.mean(dim="lat"), target_lon, atol=1e-5)
+
 
 def test_output_order_preservation():
     """Test that the output preserves the coordinate order of the target grid."""
