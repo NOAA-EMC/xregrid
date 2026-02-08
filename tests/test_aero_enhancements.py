@@ -201,5 +201,100 @@ def test_regrid_recursion_safety_double_check():
     assert res_eager.aux.shape == (9, 18)
 
 
+def test_recursion_protection_naming():
+    """Verify that recursive coordinate regridding doesn't infinite loop with naming conflicts."""
+    src = create_global_grid(30, 30)
+    tgt = create_global_grid(15, 15)
+
+    # Create a DataArray with a coordinate that points to itself or another regriddable coord
+    data = np.random.rand(6, 12)
+    da_in = xr.DataArray(
+        data, dims=("lat", "lon"), coords={"lat": src.lat, "lon": src.lon}, name="test_da"
+    )
+
+    # Add an auxiliary spatial coordinate
+    aux_coord = xr.DataArray(
+        np.random.rand(6, 12),
+        dims=("lat", "lon"),
+        coords={"lat": src.lat, "lon": src.lon},
+        name="aux_coord",
+    )
+    da_in = da_in.assign_coords(aux=aux_coord)
+
+    regridder = Regridder(src, tgt, method="bilinear")
+
+    # This should run without infinite recursion
+    res = regridder(da_in)
+    assert "aux" in res.coords
+    assert res.aux.shape == (12, 24)
+
+
+def test_lazy_breaker_avoidance_logic():
+    """Verify that grid creation handles dask-backed coordinates."""
+    src = create_global_grid(30, 30).chunk({"lat": 3, "lon": 6})
+    tgt = create_global_grid(15, 15).chunk({"lat": 3, "lon": 6})
+
+    # Initialize Regridder.
+    regridder = Regridder(src, tgt, method="bilinear")
+
+    assert regridder._weights_matrix is not None
+    assert regridder._weights_matrix.shape == (12 * 24, 6 * 12)
+
+
+def test_plot_diagnostics_interactive_smoke():
+    """Verify plot_diagnostics_interactive returns a layout (Track B)."""
+    try:
+        from xregrid.viz import plot_diagnostics_interactive
+
+        import holoviews as hv
+        import hvplot.xarray  # noqa: F401
+    except ImportError:
+        pytest.skip("hvplot or holoviews not installed")
+
+    src = create_global_grid(30, 30)
+    tgt = create_global_grid(15, 15)
+    regridder = Regridder(src, tgt, method="bilinear")
+
+    layout = plot_diagnostics_interactive(regridder)
+    assert layout is not None
+    assert hasattr(layout, "cols")
+
+
+def test_plot_weights_smoke():
+    """Verify plot_weights runs without error (Track A)."""
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError:
+        pytest.skip("matplotlib not installed")
+
+    src = create_global_grid(30, 30)
+    tgt = create_global_grid(15, 15)
+    regridder = Regridder(src, tgt, method="bilinear")
+
+    fig = regridder.plot_weights(0)
+    assert fig is not None
+    plt.close()
+
+
+def test_eager_lazy_parity_enhancements_check():
+    """Aero Protocol: Verify eager and lazy paths are identical with the new refactors."""
+    src = create_global_grid(30, 30)
+    tgt = create_global_grid(15, 15)
+    regridder = Regridder(src, tgt, method="bilinear", skipna=True)
+
+    data = np.random.rand(6, 12)
+    data[0, 0] = np.nan
+
+    da_eager = xr.DataArray(
+        data, dims=("lat", "lon"), coords={"lat": src.lat, "lon": src.lon}
+    )
+    res_eager = regridder(da_eager)
+
+    da_lazy = da_eager.chunk({"lat": 3, "lon": 6})
+    res_lazy = regridder(da_lazy).compute()
+
+    xr.testing.assert_allclose(res_eager, res_lazy)
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

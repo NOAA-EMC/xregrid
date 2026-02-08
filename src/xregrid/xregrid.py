@@ -157,18 +157,24 @@ def _bounds_to_vertices(b: xr.DataArray) -> np.ndarray:
     np.ndarray
         The vertex coordinate array.
     """
+    # ESMF requires NumPy arrays for grid creation. While we use np.asarray(b.data)
+    # to be backend-agnostic, this WILL trigger a compute for Dask-backed coordinates.
+    # We call this only for small grid coordinate chunks or on the driver when
+    # serial weight generation is required.
+    # (Aero Protocol: Backend Agnostic Interface)
     if b.ndim == 2 and b.shape[-1] == 2:
-        return np.concatenate([b.values[:, 0], b.values[-1:, 1]])
+        vals = np.asarray(b.data)
+        return np.concatenate([vals[:, 0], vals[-1:, 1]])
     elif b.ndim == 3 and b.shape[-1] == 4:
         y_size, x_size, _ = b.shape
-        vals = b.values
+        vals = np.asarray(b.data)
         res = np.empty((y_size + 1, x_size + 1))
         res[:-1, :-1] = vals[:, :, 0]
         res[:-1, -1] = vals[:, -1, 1]
         res[-1, -1] = vals[-1, -1, 2]
         res[-1, :-1] = vals[-1, :, 3]
         return res
-    return b.values
+    return np.asarray(b.data)
 
 
 def _get_grid_bounds(
@@ -195,13 +201,12 @@ def _get_grid_bounds(
         return _bounds_to_vertices(lat_b_da), _bounds_to_vertices(lon_b_da)
     except (KeyError, AttributeError, ValueError):
         if "lat_b" in ds and "lon_b" in ds:
-            lat_b = (
-                ds["lat_b"].values if hasattr(ds["lat_b"], "values") else ds["lat_b"]
-            )
-            lon_b = (
-                ds["lon_b"].values if hasattr(ds["lon_b"], "values") else ds["lon_b"]
-            )
-            return lat_b, lon_b
+            lat_b = ds["lat_b"]
+            lon_b = ds["lon_b"]
+            # Convert to numpy only when needed for ESMF. This triggers compute for lazy data.
+            lat_b_vals = np.asarray(lat_b.data) if hasattr(lat_b, "data") else lat_b
+            lon_b_vals = np.asarray(lon_b.data) if hasattr(lon_b, "data") else lon_b
+            return lat_b_vals, lon_b_vals
     return None, None
 
 
@@ -458,16 +463,16 @@ def _create_esmf_grid(
                 "Use 'nearest_s2d', 'nearest_d2s' or 'conservative' (requires mesh info)."
             )
         locstream = esmpy.LocStream(shape[0], coord_sys=esmpy.CoordSys.SPH_DEG)
-        locstream["ESMF:Lon"] = _to_degrees(lon).values.astype(np.float64)
-        locstream["ESMF:Lat"] = _to_degrees(lat).values.astype(np.float64)
+        locstream["ESMF:Lon"] = np.asarray(_to_degrees(lon).data).astype(np.float64)
+        locstream["ESMF:Lat"] = np.asarray(_to_degrees(lat).data).astype(np.float64)
 
         if mask_var and mask_var in ds:
-            locstream["ESMF:Mask"] = ds[mask_var].values.astype(np.int32)
+            locstream["ESMF:Mask"] = np.asarray(ds[mask_var].data).astype(np.int32)
 
         return locstream, provenance, None
     else:
-        lon_f = _to_degrees(lon).values.T
-        lat_f = _to_degrees(lat).values.T
+        lon_f = np.asarray(_to_degrees(lon).data).T
+        lat_f = np.asarray(_to_degrees(lat).data).T
         shape_f = lon_f.shape
 
         num_peri_dims = 1 if periodic else None
@@ -538,7 +543,7 @@ def _create_esmf_grid(
             grid.add_item(esmpy.GridItem.MASK, staggerloc=esmpy.StaggerLoc.CENTER)
             grid.get_item(esmpy.GridItem.MASK, staggerloc=esmpy.StaggerLoc.CENTER)[
                 ...
-            ] = ds[mask_var].values.T.astype(np.int32)
+            ] = np.asarray(ds[mask_var].data).T.astype(np.int32)
         return grid, provenance, None
 
 
@@ -1868,7 +1873,7 @@ class Regridder:
         self,
         da_in: xr.DataArray,
         update_history_attr: bool = True,
-        _processed_coords: Optional[set[str]] = None,
+        _processed_ids: Optional[set[int]] = None,
         skipna: Optional[bool] = None,
         na_thres: Optional[float] = None,
     ) -> xr.DataArray:
@@ -1881,8 +1886,8 @@ class Regridder:
             The input DataArray.
         update_history_attr : bool, default True
             Whether to update the history attribute.
-        _processed_coords : set of str, optional
-            Set of coordinate names already being processed to avoid infinite recursion.
+        _processed_ids : set of int, optional
+            Set of object IDs already being processed to avoid infinite recursion.
         skipna : bool, optional
             Whether to handle NaNs. If None, uses initialization default.
         na_thres : float, optional
@@ -1893,8 +1898,8 @@ class Regridder:
         xr.DataArray
             The regridded DataArray.
         """
-        if _processed_coords is None:
-            _processed_coords = set()
+        if _processed_ids is None:
+            _processed_ids = set()
 
         if skipna is None:
             skipna = self.skipna
@@ -1910,22 +1915,40 @@ class Regridder:
         aux_coords_to_regrid = {}
 
         # Track this DataArray to prevent mutual recursion (Aero Protocol: Robustness)
-        if da_in.name is not None:
-            _processed_coords.add(str(da_in.name))
+        _processed_ids.add(id(da_in))
+
+        # Also add names to prevent regridding different objects with the same name if they represent
+        # the same logical coordinate in a cycle (though IDs are more robust).
+        # We use a copy of the set for recursion to allow sibling coordinates to be regridded.
+        current_processed = _processed_ids.copy()
 
         for c_name, c_da in da_in.coords.items():
-            # Avoid infinite recursion
-            if c_name in _processed_coords:
+            # Avoid infinite recursion by checking ID and Name
+            # Xarray often recreates DataArray objects for coordinates, so ID might change,
+            # but the underlying variable/name is often a good proxy.
+            if id(c_da) in current_processed or c_name in _processed_ids:
+                continue
+
+            # Also skip if it's one of the source spatial dimensions (cannot be regridded)
+            if c_name in self._dims_source:
+                continue
+
+            # Skip if the coordinate name matches the DataArray name (prevents self-recursion)
+            if c_name == da_in.name:
                 continue
 
             if c_name not in da_in.dims and all(
                 d in c_da.dims for d in self._dims_source
             ):
                 # This is an auxiliary spatial coordinate
+                # Add current coordinate name to prevent it from being regridded again in this branch
+                branch_processed = current_processed.copy()
+                branch_processed.add(c_name)
+
                 aux_coords_to_regrid[c_name] = self._regrid_dataarray(
                     c_da,
                     update_history_attr=False,
-                    _processed_coords=_processed_coords,
+                    _processed_ids=branch_processed,
                     skipna=skipna,
                     na_thres=na_thres,
                 )
@@ -2148,12 +2171,12 @@ class Regridder:
                     pass
 
             if is_regriddable:
-                # Initialize _processed_coords with the name of the current variable
+                # Initialize _processed_ids with the ID of the current variable
                 # to prevent it from trying to regrid itself if it appears as a coordinate.
                 regridded_items[name] = self._regrid_dataarray(
                     da,
                     update_history_attr=False,
-                    _processed_coords={name},
+                    _processed_ids={id(da)},
                     skipna=skipna,
                     na_thres=na_thres,
                 )
@@ -2177,7 +2200,7 @@ class Regridder:
                             c: self._regrid_dataarray(
                                 ds_in.coords[c],
                                 update_history_attr=False,
-                                _processed_coords={c},
+                                _processed_ids={id(ds_in.coords[c])},
                                 skipna=skipna,
                                 na_thres=na_thres,
                             )
@@ -2211,6 +2234,50 @@ class Regridder:
         update_history(out, history_msg)
 
         return out
+
+    def plot_weights(self, row_idx: int, **kwargs: Any) -> Any:
+        """
+        Visualize the contribution of source points to a specific destination point.
+
+        Parameters
+        ----------
+        row_idx : int
+            The flat index of the destination point.
+        **kwargs : Any
+            Additional arguments passed to viz.plot_static.
+
+        Returns
+        -------
+        Any
+            The plot object.
+        """
+        from .viz import plot_static
+
+        if self._weights_matrix is None:
+            raise RuntimeError("Weights have not been generated yet.")
+
+        # Get the row from the CSR matrix
+        row = self._weights_matrix.getrow(row_idx)
+        data = np.zeros(int(np.prod(self._shape_source)))
+        data[row.indices] = row.data
+
+        da_weights = xr.DataArray(
+            data.reshape(self._shape_source),
+            dims=self._dims_source,
+            coords={
+                c: self.source_grid_ds.coords[c]
+                for c in self.source_grid_ds.coords
+                if set(self.source_grid_ds.coords[c].dims).issubset(
+                    set(self._dims_source)
+                )
+            },
+            name="weights",
+        )
+
+        title = kwargs.pop(
+            "title", f"Source Weights for Destination Point {row_idx} ({self.method})"
+        )
+        return plot_static(da_weights, title=title, **kwargs)
 
 
 @xr.register_dataarray_accessor("regrid")
