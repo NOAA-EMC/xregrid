@@ -21,6 +21,9 @@ if TYPE_CHECKING:
 # Global cache for workers to reuse ESMF source objects and weight matrices
 _WORKER_CACHE: dict = {}
 
+# Global cache for the driver to store distributed futures
+_DRIVER_CACHE: dict = {}
+
 
 def _setup_worker_cache(key: str, value: Any) -> None:
     """Setup a value in the worker-local cache."""
@@ -419,7 +422,9 @@ def _create_esmf_grid(
             )
 
             mesh = esmpy.Mesh(
-                parametric_dim=2, spatial_dim=2, coord_sys=esmpy.CoordSys.SPH_DEG
+                parametric_dim=2,
+                spatial_dim=2,
+                coord_sys=esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART,
             )
 
             node_count = len(node_lon)
@@ -457,7 +462,10 @@ def _create_esmf_grid(
                 f"Method '{method}' is not yet supported for unstructured grids. "
                 "Use 'nearest_s2d', 'nearest_d2s' or 'conservative' (requires mesh info)."
             )
-        locstream = esmpy.LocStream(shape[0], coord_sys=esmpy.CoordSys.SPH_DEG)
+        locstream = esmpy.LocStream(
+            shape[0],
+            coord_sys=esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART,
+        )
         locstream["ESMF:Lon"] = _to_degrees(lon).values.astype(np.float64)
         locstream["ESMF:Lat"] = _to_degrees(lat).values.astype(np.float64)
 
@@ -498,10 +506,14 @@ def _create_esmf_grid(
         if has_bounds:
             staggerlocs.append(esmpy.StaggerLoc.CORNER)
 
+        # Use CART for regional grids to avoid boundary chord issues (Aero Protocol: Robustness)
+        # SPH_DEG is used only for periodic/global grids or unstructured meshes.
+        coord_sys = esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART
+
         grid = esmpy.Grid(
             np.array(shape_f),
             staggerloc=staggerlocs,
-            coord_sys=esmpy.CoordSys.SPH_DEG,
+            coord_sys=coord_sys,
             num_peri_dims=num_peri_dims,
             periodic_dim=periodic_dim,
             pole_dim=pole_dim,
@@ -727,6 +739,7 @@ def _apply_weights_core(
     skipna: bool = False,
     total_weights: Optional[np.ndarray] = None,
     na_thres: float = 1.0,
+    weights_key: Optional[str] = None,
 ) -> np.ndarray:
     """
     Apply regridding weights to a data block (NumPy array).
@@ -753,23 +766,23 @@ def _apply_weights_core(
     np.ndarray
         The regridded data block.
     """
-    # Worker-local cache retrieval
-    weights_matrix_key = None
+    # Worker-local cache retrieval (backward compatibility or explicit key)
+    weights_matrix_key = weights_key
     if isinstance(weights_matrix, str):
         weights_matrix_key = weights_matrix
-        if weights_matrix_key not in _WORKER_CACHE:
+        weights_matrix = _WORKER_CACHE.get(weights_matrix_key)
+        if weights_matrix is None:
             raise RuntimeError(
                 f"Weights key '{weights_matrix_key}' not found in worker cache."
             )
-        weights_matrix = _WORKER_CACHE[weights_matrix_key]
 
     if isinstance(total_weights, str):
         total_weights_key = total_weights
-        if total_weights_key not in _WORKER_CACHE:
+        total_weights = _WORKER_CACHE.get(total_weights_key)
+        if total_weights is None:
             raise RuntimeError(
                 f"Total weights key '{total_weights_key}' not found in worker cache."
             )
-        total_weights = _WORKER_CACHE[total_weights_key]
 
     original_shape = data_block.shape
     # Core dimensions are at the end
@@ -988,6 +1001,12 @@ class Regridder:
         self.extrap_method = extrap_method
         self.extrap_dist_exponent = extrap_dist_exponent
 
+        # Robust coordinate handling: internally sort coordinates to be ascending
+        # to ensure ESMF weight generation is stable and avoid boundary issues.
+        # (Aero Protocol: User doesn't have to worry about monotonicity)
+        self.source_grid_ds, self._src_was_sorted = self._normalize_grid(source_grid_ds)
+        self.target_grid_ds, self._tgt_was_sorted = self._normalize_grid(target_grid_ds)
+
         self.method_map = {
             "bilinear": esmpy.RegridMethod.BILINEAR,
             "conservative": esmpy.RegridMethod.CONSERVE,
@@ -1064,6 +1083,32 @@ class Regridder:
             reuse_weights=True,
             **kwargs,
         )
+
+    def _normalize_grid(self, ds: xr.Dataset) -> Tuple[xr.Dataset, bool]:
+        """Internally sort rectilinear coordinates to be ascending."""
+        was_sorted = False
+        try:
+            # Only for rectilinear 1D coordinates
+            lat_dim = ds.cf["latitude"].dims[0]
+            lon_dim = ds.cf["longitude"].dims[0]
+
+            if ds[lat_dim].ndim == 1 and ds[lon_dim].ndim == 1:
+                # Check if descending or non-monotonic
+                lat_vals = ds[lat_dim].values
+                lon_vals = ds[lon_dim].values
+
+                needs_sort = False
+                if not (
+                    np.all(np.diff(lat_vals) > 0) and np.all(np.diff(lon_vals) > 0)
+                ):
+                    needs_sort = True
+
+                if needs_sort:
+                    ds = ds.sortby([lat_dim, lon_dim])
+                    was_sorted = True
+        except (KeyError, AttributeError, ValueError):
+            pass
+        return ds, was_sorted
 
     def _validate_weights(self) -> None:
         """
@@ -1852,9 +1897,22 @@ class Regridder:
             na_thres = self.na_thres
 
         if isinstance(obj, xr.Dataset):
-            return self._regrid_dataset(obj, skipna=skipna, na_thres=na_thres)
+            # Sort input object if source grid was normalized
+            if self._src_was_sorted:
+                obj = obj.sortby([self._dims_source[0], self._dims_source[1]])
+            res = self._regrid_dataset(obj, skipna=skipna, na_thres=na_thres)
+            # Restore original target coordinate order if it was sorted
+            if self._tgt_was_sorted:
+                # Use sel to restore order without full reindexing if possible
+                res = res.sel({d: self.target_grid_ds[d] for d in self._dims_target})
+            return res
         elif isinstance(obj, xr.DataArray):
-            return self._regrid_dataarray(obj, skipna=skipna, na_thres=na_thres)
+            if self._src_was_sorted:
+                obj = obj.sortby([self._dims_source[0], self._dims_source[1]])
+            res = self._regrid_dataarray(obj, skipna=skipna, na_thres=na_thres)
+            if self._tgt_was_sorted:
+                res = res.sel({d: self.target_grid_ds[d] for d in self._dims_target})
+            return res
         # Handle uxarray objects if they don't pass isinstance(xr.Dataset)
         elif hasattr(obj, "uxgrid"):
             if hasattr(obj, "data_vars"):
@@ -1983,10 +2041,10 @@ class Regridder:
 
         weights_arg = self._weights_matrix
         total_weights_arg = self._total_weights
+        weights_key_arg = None
 
         # Optimization: Use worker-local cache for weights and total_weights to avoid
-        # serialization overhead when using Dask. Automatically detect if a client is
-        # active for Dask-backed data.
+        # serialization overhead when using Dask. (Aero Protocol: Dask Efficiency)
         if hasattr(da_in.data, "dask"):
             client = self._dask_client
             if client is None:
@@ -1997,37 +2055,27 @@ class Regridder:
                 except (ImportError, ValueError):
                     client = None
 
-            # Verify that the client is functional and has active workers
             if client is not None:
-                try:
-                    # If scheduler has no workers, don't attempt distributed scattering
-                    if not client.scheduler_info()["workers"]:
-                        client = None
-                except Exception:
-                    client = None
+                w_id = id(self._weights_matrix)
+                weights_key_arg = f"w_{w_id}"
 
-            if client is not None:
-                # 1. Distribute sparse weight matrix
-                weights_key = f"weights_{id(self._weights_matrix)}"
-                if weights_key not in _WORKER_CACHE:
-                    # Optimization: Use scatter for more efficient distribution of large objects.
-                    # This avoids the overhead of sending the large matrix in a blocking client.run call.
-                    # We scatter to all workers and then register the key using client.run.
-                    future = client.scatter(self._weights_matrix, broadcast=True)
-                    client.run(_setup_worker_cache, weights_key, future)
-                    _WORKER_CACHE[weights_key] = (
-                        self._weights_matrix
-                    )  # Also cache locally
-                weights_arg = weights_key
+                # Check if workers need the matrix
+                if (client, weights_key_arg) not in _DRIVER_CACHE:
+                    # Use client.run to synchronously populate the worker cache.
+                    # This is robust and ensures all current workers have the data.
+                    client.run(
+                        _setup_worker_cache, weights_key_arg, self._weights_matrix
+                    )
+                    _DRIVER_CACHE[(client, weights_key_arg)] = True
+                weights_arg = weights_key_arg
 
-                # 2. Distribute total_weights array (if present)
                 if self._total_weights is not None:
-                    total_weights_key = f"tw_{id(self._total_weights)}"
-                    if total_weights_key not in _WORKER_CACHE:
-                        future_tw = client.scatter(self._total_weights, broadcast=True)
-                        client.run(_setup_worker_cache, total_weights_key, future_tw)
-                        _WORKER_CACHE[total_weights_key] = self._total_weights
-                    total_weights_arg = total_weights_key
+                    tw_id = id(self._total_weights)
+                    tw_key = f"tw_{tw_id}"
+                    if (client, tw_key) not in _DRIVER_CACHE:
+                        client.run(_setup_worker_cache, tw_key, self._total_weights)
+                        _DRIVER_CACHE[(client, tw_key)] = True
+                    total_weights_arg = tw_key
 
         # Use allow_rechunk=True to support chunked core dimensions
         # and move output_sizes to dask_gufunc_kwargs for future compatibility
@@ -2042,6 +2090,7 @@ class Regridder:
                 "skipna": skipna,
                 "total_weights": total_weights_arg,
                 "na_thres": na_thres,
+                "weights_key": weights_key_arg,
             },
             input_core_dims=[input_core_dims],
             output_core_dims=[temp_output_core_dims],

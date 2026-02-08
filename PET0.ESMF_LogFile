@@ -5,3 +5,260 @@
 20260207 113443.596 ERROR            PET0 /home/conda/feedstock_root/build_artifacts/esmf_1767773669636/work/src/Infrastructure/Mesh/src/ESMCI_Mesh_Glue.C:3578 ESMCI_getlocalelemcoords() Arguments are incompatible  - Internal subroutine call returned Error
 20260207 113443.596 ERROR            PET0 ESMC_Mesh.C:345 ESMC_MeshGetElemCoord() Arguments are incompatible  - Internal subroutine call returned Error
 20260207 113443.597 INFO             PET0  Finalizing ESMF
+20260208 121103.938 ERROR            PET0 ~~~~~~~~~~~~~~~~~~~~ Degenerate Element Detected ~~~~~~~~~~~~~~~~~~~~
+20260208 121103.938 ERROR            PET0   degenerate elem. id=37
+20260208 121103.938 ERROR            PET0
+20260208 121103.938 ERROR            PET0   degenerate elem. coords (lon [-180 to 180], lat [-90 to 90]) (x,y,z)
+20260208 121103.938 ERROR            PET0   -----------------------------------------------------------------
+20260208 121103.938 ERROR            PET0     0  (0.000000,  -90.000000)  (0.000000, 0.000000, -1.000000)
+20260208 121103.938 ERROR            PET0     1  (0.000000,  -90.000000)  (0.000000, 0.000000, -1.000000)
+20260208 121103.938 ERROR            PET0     2  (0.000000,  -80.000000)  (0.173648, 0.000000, -0.984808)
+20260208 121103.938 ERROR            PET0     3  (-0.000000,  -80.000000)  (0.173648, -0.000000, -0.984808)
+20260208 121103.938 ERROR            PET0 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+20260208 121103.938 ERROR            PET0 ESMCI_Mesh_Regrid_Glue.C:271 ESMCI_regrid_create() Invalid argument  - - Src contains a cell that has corners close enough that the cell collapses to a line or point
+20260208 121103.939 ERROR            PET0 ESMCI_Mesh_Regrid_Glue.C:839 ESMCI_regrid_create() Invalid argument  - Internal subroutine call returned Error
+20260208 121103.939 ERROR            PET0 ESMCI_MeshCap.C:1681 MeshCap::regrid_create() Invalid argument  - Internal subroutine call returned Error
+20260208 121103.939 ERROR            PET0 ESMF_Regrid.F90:384 ESMF_RegridStore Invalid argument  - Internal subroutine call returned Error
+20260208 121103.939 ERROR            PET0 ESMF_FieldRegrid.F90:1302 ESMF_FieldRegridStoreNX Invalid argument  - Internal subroutine call returned Error
+20260208 121103.939 ERROR            PET0 ESMF_Field_C.F90:1157 f_esmf_regridstore Invalid argument  - Internal subroutine call returned Error
+20260208 121103.939 ERROR            PET0 ESMCI_Field.C:1472 ESMCI::Field::regridstore() Invalid argument  - Internal subroutine call returned Error
+20260208 121103.939 ERROR            PET0 ESMC_Field.C:473 ESMC_FieldRegridStore() Invalid argument  - Internal subroutine call returned Error
+20260208 121103.945 INFO             PET0  Finalizing ESMF
+20260208 121551.868 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 121848.739 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 121848.753 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 121848.756 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 121848.830 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 122033.451 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 122033.453 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 122033.453 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 122033.456 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 122907.057 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 122907.059 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 122907.065 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 122907.075 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 123051.221 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 123051.221 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 124942.879 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 124942.880 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125029.953 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125029.953 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125032.366 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125032.366 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125035.798 ERROR            PET0 ESMCI_Mesh_Regrid_Glue.C:829 ESMCI_regrid_create() Internal error: Bad condition  - Condition {sdim == dst_dim} failed at /home/conda/feedstock_root/build_artifacts/esmf_1767773669636/work/src/Infrastructure/Mesh/src/Legacy/ESMCI_GeomRendezvous.C, line:217
+20260208 125035.798 ERROR            PET0 ESMCI_MeshCap.C:1681 MeshCap::regrid_create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125035.798 ERROR            PET0 ESMF_Regrid.F90:384 ESMF_RegridStore Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125035.798 ERROR            PET0 ESMF_FieldRegrid.F90:1302 ESMF_FieldRegridStoreNX Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125035.798 ERROR            PET0 ESMF_Field_C.F90:1157 f_esmf_regridstore Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125035.798 ERROR            PET0 ESMCI_Field.C:1472 ESMCI::Field::regridstore() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125035.798 ERROR            PET0 ESMC_Field.C:473 ESMC_FieldRegridStore() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.134 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125036.134 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.134 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.134 ERROR            PET0 ESMF_Grid.F90:29715 ESMF_GridCreateDistgridReg Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.134 ERROR            PET0 ESMF_Grid.F90:10892 ESMF_GridCreateNoPeriDimR Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.134 ERROR            PET0 ESMF_Grid_C.F90:78 f_esmf_gridcreatenoperidim Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.134 ERROR            PET0 ESMCI_Grid.C:259 ESMCI::Grid::createnoperidim() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.134 ERROR            PET0 ESMC_Grid.C:83 ESMC_GridCreateNoPeriDim() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.202 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125036.202 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.202 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.202 ERROR            PET0 ESMF_Grid.F90:29715 ESMF_GridCreateDistgridReg Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.202 ERROR            PET0 ESMF_Grid.F90:10892 ESMF_GridCreateNoPeriDimR Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.202 ERROR            PET0 ESMF_Grid_C.F90:78 f_esmf_gridcreatenoperidim Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.202 ERROR            PET0 ESMCI_Grid.C:259 ESMCI::Grid::createnoperidim() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.202 ERROR            PET0 ESMC_Grid.C:83 ESMC_GridCreateNoPeriDim() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.268 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125036.268 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.268 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.268 ERROR            PET0 ESMF_Grid.F90:29715 ESMF_GridCreateDistgridReg Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.268 ERROR            PET0 ESMF_Grid.F90:10892 ESMF_GridCreateNoPeriDimR Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.268 ERROR            PET0 ESMF_Grid_C.F90:78 f_esmf_gridcreatenoperidim Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.268 ERROR            PET0 ESMCI_Grid.C:259 ESMCI::Grid::createnoperidim() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.268 ERROR            PET0 ESMC_Grid.C:83 ESMC_GridCreateNoPeriDim() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.320 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125036.320 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.320 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.320 ERROR            PET0 ESMF_Grid.F90:29715 ESMF_GridCreateDistgridReg Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.320 ERROR            PET0 ESMF_Grid.F90:10892 ESMF_GridCreateNoPeriDimR Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.320 ERROR            PET0 ESMF_Grid_C.F90:78 f_esmf_gridcreatenoperidim Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.320 ERROR            PET0 ESMCI_Grid.C:259 ESMCI::Grid::createnoperidim() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.320 ERROR            PET0 ESMC_Grid.C:83 ESMC_GridCreateNoPeriDim() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.536 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125036.536 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.536 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.536 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.536 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.536 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.536 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.546 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125036.546 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.546 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.546 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.546 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.546 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.546 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.566 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125036.566 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.566 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.566 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.566 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.566 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.566 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.581 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125036.581 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.581 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.581 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.581 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.581 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.581 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.771 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125036.771 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.771 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.771 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.771 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.771 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.771 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.792 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125036.792 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.792 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.792 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.792 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.792 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.792 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.812 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125036.812 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.812 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.812 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.812 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.812 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.812 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.826 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125036.826 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.826 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.826 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.826 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.826 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125036.826 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.112 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125037.113 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.113 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.113 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.113 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.113 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.113 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.137 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125037.137 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.137 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.137 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.137 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.137 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.137 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.169 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125037.169 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.169 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.169 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.169 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.169 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.169 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.186 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125037.186 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.186 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.186 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.186 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.186 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.186 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.415 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125037.416 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.416 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.416 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.416 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.416 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.416 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.453 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125037.453 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.453 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.453 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.453 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.453 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.453 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.491 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125037.491 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.491 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.491 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.491 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.491 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.491 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.534 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125037.534 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.534 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.534 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.534 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.534 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.534 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.811 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125037.811 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.811 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.811 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.811 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.811 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.811 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.832 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125037.832 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.832 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.832 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.832 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.832 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.832 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.850 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125037.851 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.851 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.851 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.851 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.851 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.851 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.865 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125037.865 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.865 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.865 ERROR            PET0 ESMF_LocStream.F90:1780 ESMF_LocStreamCreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.865 ERROR            PET0 ESMF_LocStream_C.F90:57 f_esmf_locstreamcreate Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.865 ERROR            PET0 ESMCI_LocStream.C:122 ESMCI::LocStream::create() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125037.865 ERROR            PET0 ESMC_LocStream.C:50 ESMC_LocStreamCreateLocal() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.266 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125038.267 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.267 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.267 ERROR            PET0 ESMF_Grid.F90:29715 ESMF_GridCreateDistgridReg Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.267 ERROR            PET0 ESMF_Grid.F90:10892 ESMF_GridCreateNoPeriDimR Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.267 ERROR            PET0 ESMF_Grid_C.F90:78 f_esmf_gridcreatenoperidim Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.267 ERROR            PET0 ESMCI_Grid.C:259 ESMCI::Grid::createnoperidim() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.267 ERROR            PET0 ESMC_Grid.C:83 ESMC_GridCreateNoPeriDim() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.416 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125038.417 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.417 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.417 ERROR            PET0 ESMF_Grid.F90:29715 ESMF_GridCreateDistgridReg Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.417 ERROR            PET0 ESMF_Grid.F90:10892 ESMF_GridCreateNoPeriDimR Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.417 ERROR            PET0 ESMF_Grid_C.F90:78 f_esmf_gridcreatenoperidim Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.417 ERROR            PET0 ESMCI_Grid.C:259 ESMCI::Grid::createnoperidim() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.417 ERROR            PET0 ESMC_Grid.C:83 ESMC_GridCreateNoPeriDim() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.566 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125038.566 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.567 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.567 ERROR            PET0 ESMF_Grid.F90:29715 ESMF_GridCreateDistgridReg Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.567 ERROR            PET0 ESMF_Grid.F90:10892 ESMF_GridCreateNoPeriDimR Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.567 ERROR            PET0 ESMF_Grid_C.F90:78 f_esmf_gridcreatenoperidim Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.567 ERROR            PET0 ESMCI_Grid.C:259 ESMCI::Grid::createnoperidim() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.567 ERROR            PET0 ESMC_Grid.C:83 ESMC_GridCreateNoPeriDim() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.635 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125038.635 ERROR            PET0 ESMCI_VM_F.C:1144 c_esmc_vmgetcurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.635 ERROR            PET0 ESMF_VM.F90:5642 ESMF_VMGetCurrent() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.635 ERROR            PET0 ESMF_Grid.F90:29715 ESMF_GridCreateDistgridReg Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.635 ERROR            PET0 ESMF_Grid.F90:10892 ESMF_GridCreateNoPeriDimR Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.635 ERROR            PET0 ESMF_Grid_C.F90:78 f_esmf_gridcreatenoperidim Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.635 ERROR            PET0 ESMCI_Grid.C:259 ESMCI::Grid::createnoperidim() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.635 ERROR            PET0 ESMC_Grid.C:83 ESMC_GridCreateNoPeriDim() Internal error: Bad condition  - Internal subroutine call returned Error
+20260208 125038.971 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125038.978 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125057.816 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125057.816 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125100.314 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260208 125100.314 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
