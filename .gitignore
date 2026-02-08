@@ -281,4 +281,4 @@ regridded_*.nc
 
 # Performance test outputs
 performance_test_*.nc
-benchmark_*.nc
+benchmark_*.nc*.ESMF_LogFile
