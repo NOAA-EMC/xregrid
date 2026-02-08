@@ -367,6 +367,64 @@ def plot_diagnostics(
     return fig
 
 
+def plot_diagnostics_interactive(
+    regridder: "Regridder",
+    rasterize: bool = True,
+    cmap: str = "viridis",
+    mask_cmap: str = "Reds",
+    **kwargs: Any,
+) -> Any:
+    """
+    Track B: Exploratory interactive diagnostics using HvPlot.
+
+    Parameters
+    ----------
+    regridder : Regridder
+        The Regridder instance to diagnose.
+    rasterize : bool, default True
+        Whether to rasterize the grid for large datasets (Aero Protocol requirement).
+    cmap : str, default 'viridis'
+        Colormap for the weight sum.
+    mask_cmap : str, default 'Reds'
+        Colormap for the unmapped mask.
+    **kwargs : Any
+        Additional arguments passed to hvplot calls.
+
+    Returns
+    -------
+    Any
+        The interactive plot object (HvPlot/HoloViews Layout).
+
+    Raises
+    ------
+    ImportError
+        If HvPlot is not installed.
+    """
+    if not hvplot or hv is None:
+        raise ImportError(
+            "HvPlot and HoloViews are required for plot_diagnostics_interactive. "
+            "Install them with `pip install hvplot holoviews`."
+        )
+
+    ds_diag = regridder.diagnostics()
+
+    p_sum = ds_diag.weight_sum.hvplot(
+        rasterize=rasterize, cmap=cmap, title="Weight Sum", **kwargs
+    )
+
+    p_mask = ds_diag.unmapped_mask.hvplot(
+        rasterize=rasterize,
+        cmap=mask_cmap,
+        title="Unmapped Mask (1=Unmapped)",
+        **kwargs,
+    )
+
+    layout = (p_sum + p_mask).cols(2)
+    layout = layout.opts(title=f"Regridder Diagnostics ({regridder.method})")
+
+    return layout
+
+
 def plot_comparison(
     da_src: xr.DataArray,
     da_tgt: xr.DataArray,

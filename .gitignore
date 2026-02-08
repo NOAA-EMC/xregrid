@@ -243,6 +243,7 @@ $RECYCLE.BIN/
 *.nc
 weights_*.nc
 *_weights.nc
+test_extrap.nc
 
 # Example outputs
 *.png
@@ -259,6 +260,7 @@ temp/
 
 # Log files
 *.log
+PET*.ESMF_LogFile
 
 # Backup files
 *.bak
