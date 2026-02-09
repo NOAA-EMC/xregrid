@@ -2259,16 +2259,39 @@ class Regridder:
         out.attrs.update(da_in.attrs)
         out.encoding.update(da_in.encoding)
 
-        # Assign coordinates from target grid
-        out = out.assign_coords(
-            {
-                c: self.target_grid_ds.coords[c]
-                for c in self.target_grid_ds.coords
-                if set(self.target_grid_ds.coords[c].dims).issubset(
-                    set(self._dims_target)
-                )
-            }
-        )
+        # Assign coordinates from target grid (including scalar coords like grid_mapping)
+        # (Aero Protocol: Scientific Hygiene)
+        target_coords_to_assign = {}
+        target_gm_name = None
+
+        for c in self.target_grid_ds.coords:
+            # Include coordinates that match target dimensions OR are scalar
+            if set(self.target_grid_ds.coords[c].dims).issubset(set(self._dims_target)):
+                target_coords_to_assign[c] = self.target_grid_ds.coords[c]
+                # Identify if this is a grid_mapping coordinate
+                if "grid_mapping_name" in self.target_grid_ds.coords[c].attrs:
+                    target_gm_name = c
+
+        # Also check data_vars in target_grid_ds for grid_mapping variables
+        if target_gm_name is None:
+            for v in self.target_grid_ds.data_vars:
+                if "grid_mapping_name" in self.target_grid_ds[v].attrs:
+                    target_gm_name = v
+                    target_coords_to_assign[v] = self.target_grid_ds[v]
+
+        out = out.assign_coords(target_coords_to_assign)
+
+        # Update grid_mapping attribute (Aero Protocol: Scientific Hygiene)
+        if target_gm_name:
+            out.attrs["grid_mapping"] = target_gm_name
+            if "grid_mapping" in out.encoding:
+                out.encoding["grid_mapping"] = target_gm_name
+        else:
+            # If target has no grid mapping, remove source one as it's no longer valid for this grid
+            if "grid_mapping" in out.attrs:
+                del out.attrs["grid_mapping"]
+            if "grid_mapping" in out.encoding:
+                del out.encoding["grid_mapping"]
 
         # Re-attach regridded auxiliary coordinates
         if aux_coords_to_regrid:
@@ -2381,10 +2404,37 @@ class Regridder:
                 # Not dependent on spatial dims, just preserve it
                 out = out.assign_coords({c: ds_in.coords[c]})
 
-        # Attach scalar coordinates from target grid (e.g., grid_mapping)
+        # 3. Handle grid_mapping and scalar coordinates from target grid (Aero Protocol)
+        target_gm_name = None
         for c in self.target_grid_ds.coords:
-            if c not in out.coords and not self.target_grid_ds.coords[c].dims:
-                out = out.assign_coords({c: self.target_grid_ds.coords[c]})
+            if c not in out.coords:
+                if set(self.target_grid_ds.coords[c].dims).issubset(
+                    set(self._dims_target)
+                ):
+                    out = out.assign_coords({c: self.target_grid_ds.coords[c]})
+
+            # Identify target grid mapping variable
+            if "grid_mapping_name" in self.target_grid_ds.coords[c].attrs:
+                target_gm_name = c
+
+        # Also check target data_vars for grid_mapping
+        if target_gm_name is None:
+            for v in self.target_grid_ds.data_vars:
+                if "grid_mapping_name" in self.target_grid_ds[v].attrs:
+                    target_gm_name = v
+                    if target_gm_name not in out.coords:
+                        out = out.assign_coords(
+                            {target_gm_name: self.target_grid_ds[v]}
+                        )
+
+        # Update global grid_mapping attribute if it exists
+        if target_gm_name:
+            if "grid_mapping" in out.attrs:
+                out.attrs["grid_mapping"] = target_gm_name
+        else:
+            # Remove invalid grid_mapping
+            if "grid_mapping" in out.attrs:
+                del out.attrs["grid_mapping"]
 
         # Update history for provenance
         esmpy_version = getattr(esmpy, "__version__", "unknown")
