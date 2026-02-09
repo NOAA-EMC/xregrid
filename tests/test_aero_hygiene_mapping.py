@@ -1,11 +1,17 @@
-import numpy as np
 import sys
 from unittest.mock import MagicMock
 
+import numpy as np
+
 # Mock esmpy BEFORE importing xregrid to allow running in environments without ESMF
 try:
-    import esmpy
+    import esmpy  # noqa: F401
+
+    ESMPY_AVAILABLE = True
 except ImportError:
+    ESMPY_AVAILABLE = False
+
+if not ESMPY_AVAILABLE:
     mock_esmpy = MagicMock()
     mock_esmpy.CoordSys.SPH_DEG = 1
     mock_esmpy.CoordSys.CART = 0
@@ -20,21 +26,35 @@ except ImportError:
     class Grid(MockESMFObject):
         def __init__(self, shape, *args, **kwargs):
             self.shape = shape
+
         def get_coords(self, dim, staggerloc=None):
             return np.zeros(self.shape)
-        def add_item(self, *args, **kwargs): pass
-        def get_item(self, *args, **kwargs): return np.zeros(self.shape)
+
+        def add_item(self, *args, **kwargs):
+            pass
+
+        def get_item(self, *args, **kwargs):
+            return np.zeros(self.shape)
 
     class Mesh(MockESMFObject):
-        def __init__(self, *args, **kwargs): pass
-        def add_nodes(self, *args, **kwargs): pass
-        def add_elements(self, *args, **kwargs): pass
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def add_nodes(self, *args, **kwargs):
+            pass
+
+        def add_elements(self, *args, **kwargs):
+            pass
 
     class LocStream(MockESMFObject):
         def __init__(self, size, *args, **kwargs):
             self.size = size
-        def __getitem__(self, key): return np.zeros(self.size)
-        def __setitem__(self, key, value): pass
+
+        def __getitem__(self, key):
+            return np.zeros(self.size)
+
+        def __setitem__(self, key, value):
+            pass
 
     mock_esmpy.Grid = Grid
     mock_esmpy.Mesh = Mesh
@@ -42,13 +62,16 @@ except ImportError:
     mock_esmpy.Field = MagicMock()
 
     class MockRegrid:
-        def __init__(self, *args, **kwargs): pass
+        def __init__(self, *args, **kwargs):
+            pass
+
         def get_weights_dict(self, deep_copy=True):
             return {
                 "row_dst": np.array([1]),
                 "col_src": np.array([1]),
                 "weights": np.array([1.0]),
             }
+
         def get_factors(self):
             return np.array([1.0]), np.array([1])
 
@@ -60,6 +83,7 @@ except ImportError:
 import xarray as xr  # noqa: E402
 from xregrid import Regridder  # noqa: E402
 
+
 def test_grid_mapping_hygiene():
     """Verify that grid_mapping is correctly updated and preserved (Aero Protocol)."""
 
@@ -70,14 +94,16 @@ def test_grid_mapping_hygiene():
             "lon": (["lon"], np.arange(10)),
         }
     )
-    src_ds["crs_src"] = xr.DataArray(0, attrs={"grid_mapping_name": "latitude_longitude"})
+    src_ds["crs_src"] = xr.DataArray(
+        0, attrs={"grid_mapping_name": "latitude_longitude"}
+    )
 
     da_src = xr.DataArray(
         np.random.rand(10, 10),
         dims=("lat", "lon"),
         coords=src_ds.coords,
         name="test_data",
-        attrs={"grid_mapping": "crs_src"}
+        attrs={"grid_mapping": "crs_src"},
     )
 
     # 2. Setup target grid with different grid_mapping
@@ -110,6 +136,7 @@ def test_grid_mapping_hygiene():
     assert out_computed.attrs["grid_mapping"] == "crs_tgt"
     assert "crs_tgt" in out_computed.coords
 
+
 def test_dataset_grid_mapping_hygiene():
     """Verify that grid_mapping is correctly updated for Datasets."""
 
@@ -119,7 +146,9 @@ def test_dataset_grid_mapping_hygiene():
             "lon": (["lon"], np.arange(10)),
         }
     )
-    src_ds["crs_src"] = xr.DataArray(0, attrs={"grid_mapping_name": "latitude_longitude"})
+    src_ds["crs_src"] = xr.DataArray(
+        0, attrs={"grid_mapping_name": "latitude_longitude"}
+    )
     src_ds["var1"] = (["lat", "lon"], np.random.rand(10, 10))
     src_ds["var1"].attrs["grid_mapping"] = "crs_src"
     src_ds.attrs["grid_mapping"] = "crs_src"
