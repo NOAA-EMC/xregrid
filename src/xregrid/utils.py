@@ -51,12 +51,17 @@ def create_global_grid(
     )
 
     if add_bounds:
-        # Use CF-compliant (N, 2) bounds sharing dimensions with centers
-        # This ensures correct slicing when using Dask chunks (Aero Protocol: Scientific Hygiene)
-        lat_b = np.stack([lat - res_lat / 2, lat + res_lat / 2], axis=-1)
-        lon_b = np.stack([lon - res_lon / 2, lon + res_lon / 2], axis=-1)
-        ds.coords["lat_b"] = (["lat", "nv"], lat_b, {"units": "degrees_north"})
-        ds.coords["lon_b"] = (["lon", "nv"], lon_b, {"units": "degrees_east"})
+        # Use CF-compliant (N, 2) bounds that share dimensions with the grid.
+        # This ensures they are correctly subsetted and sorted by xarray.
+        # (Aero Protocol: Dask Efficiency & Robustness)
+        lat_b_1d = np.arange(-90, 90 + res_lat, res_lat)
+        lon_b_1d = np.arange(0, 360 + res_lon, res_lon)
+
+        lat_b_2d = np.stack([lat_b_1d[:-1], lat_b_1d[1:]], axis=1)
+        lon_b_2d = np.stack([lon_b_1d[:-1], lon_b_1d[1:]], axis=1)
+
+        ds.coords["lat_b"] = (["lat", "nv"], lat_b_2d, {"units": "degrees_north"})
+        ds.coords["lon_b"] = (["lon", "nv"], lon_b_2d, {"units": "degrees_east"})
 
         # Link bounds using cf-xarray convention
         ds["lat"].attrs["bounds"] = "lat_b"
@@ -114,12 +119,15 @@ def create_regional_grid(
     )
 
     if add_bounds:
-        # Use CF-compliant (N, 2) bounds sharing dimensions with centers
-        # This ensures correct slicing when using Dask chunks (Aero Protocol: Scientific Hygiene)
-        lat_b = np.stack([lat - res_lat / 2, lat + res_lat / 2], axis=-1)
-        lon_b = np.stack([lon - res_lon / 2, lon + res_lon / 2], axis=-1)
-        ds.coords["lat_b"] = (["lat", "nv"], lat_b, {"units": "degrees_north"})
-        ds.coords["lon_b"] = (["lon", "nv"], lon_b, {"units": "degrees_east"})
+        # Use CF-compliant (N, 2) bounds.
+        lat_b_1d = np.arange(lat_range[0], lat_range[1] + res_lat, res_lat)
+        lon_b_1d = np.arange(lon_range[0], lon_range[1] + res_lon, res_lon)
+
+        lat_b_2d = np.stack([lat_b_1d[:-1], lat_b_1d[1:]], axis=1)
+        lon_b_2d = np.stack([lon_b_1d[:-1], lon_b_1d[1:]], axis=1)
+
+        ds.coords["lat_b"] = (["lat", "nv"], lat_b_2d, {"units": "degrees_north"})
+        ds.coords["lon_b"] = (["lon", "nv"], lon_b_2d, {"units": "degrees_east"})
 
         ds["lat"].attrs["bounds"] = "lat_b"
         ds["lon"].attrs["bounds"] = "lon_b"

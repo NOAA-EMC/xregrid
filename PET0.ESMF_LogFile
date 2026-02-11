@@ -1,0 +1,17 @@
+20260211 160528.338 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260211 160534.164 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260211 160537.097 ERROR            PET0 /home/conda/feedstock_root/build_artifacts/esmf_1767773669636/work/src/Infrastructure/Mesh/src/ESMCI_Mesh_Glue.C:3563 ESMCI_getlocalelemcoords() Arguments are incompatible  -  - elem_coordinates not found in Mesh
+20260211 160537.101 ERROR            PET0 /home/conda/feedstock_root/build_artifacts/esmf_1767773669636/work/src/Infrastructure/Mesh/src/ESMCI_Mesh_Glue.C:3578 ESMCI_getlocalelemcoords() Arguments are incompatible  - Internal subroutine call returned Error
+20260211 160537.101 ERROR            PET0 ESMC_Mesh.C:345 ESMC_MeshGetElemCoord() Arguments are incompatible  - Internal subroutine call returned Error
+20260211 160537.154 ERROR            PET0 /home/conda/feedstock_root/build_artifacts/esmf_1767773669636/work/src/Infrastructure/Mesh/src/ESMCI_Mesh_Glue.C:3563 ESMCI_getlocalelemcoords() Arguments are incompatible  -  - elem_coordinates not found in Mesh
+20260211 160537.154 ERROR            PET0 /home/conda/feedstock_root/build_artifacts/esmf_1767773669636/work/src/Infrastructure/Mesh/src/ESMCI_Mesh_Glue.C:3578 ESMCI_getlocalelemcoords() Arguments are incompatible  - Internal subroutine call returned Error
+20260211 160537.154 ERROR            PET0 ESMC_Mesh.C:345 ESMC_MeshGetElemCoord() Arguments are incompatible  - Internal subroutine call returned Error
+20260211 160609.655 ERROR            PET0 /home/conda/feedstock_root/build_artifacts/esmf_1767773669636/work/src/Infrastructure/Mesh/src/ESMCI_Mesh_Glue.C:3563 ESMCI_getlocalelemcoords() Arguments are incompatible  -  - elem_coordinates not found in Mesh
+20260211 160609.655 ERROR            PET0 /home/conda/feedstock_root/build_artifacts/esmf_1767773669636/work/src/Infrastructure/Mesh/src/ESMCI_Mesh_Glue.C:3578 ESMCI_getlocalelemcoords() Arguments are incompatible  - Internal subroutine call returned Error
+20260211 160609.655 ERROR            PET0 ESMC_Mesh.C:345 ESMC_MeshGetElemCoord() Arguments are incompatible  - Internal subroutine call returned Error
+20260211 160622.362 INFO             PET0  Finalizing ESMF
+rmine current VM
+20260211 160604.965 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260211 160604.966 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260211 160609.499 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
+20260211 160609.499 ERROR            PET0 ESMCI_VM.C:2360 ESMCI::VM::getCurrent() Internal error: Bad condition  - - Could not determine current VM
