@@ -528,52 +528,66 @@ def _create_esmf_grid(
         if coord_sys is None:
             coord_sys = esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART
 
-        if method == "conservative":
-            # Use Mesh for conservative regridding
-            node_lon, node_lat, element_conn, element_types, element_ids, orig_idx = (
-                _get_unstructured_mesh_info(ds)
-            )
+        # Attempt Mesh creation for methods that support it on unstructured grids
+        if method in ["conservative", "bilinear", "patch"]:
+            try:
+                (
+                    node_lon,
+                    node_lat,
+                    element_conn,
+                    element_types,
+                    element_ids,
+                    orig_idx,
+                ) = _get_unstructured_mesh_info(ds)
 
-            mesh = esmpy.Mesh(
-                parametric_dim=2,
-                spatial_dim=2,
-                coord_sys=coord_sys,
-            )
+                mesh = esmpy.Mesh(
+                    parametric_dim=2,
+                    spatial_dim=2,
+                    coord_sys=coord_sys,
+                )
 
-            node_count = len(node_lon)
-            # ESMF/ESMPy typically expects 32-bit integers for IDs and connectivity
-            node_ids = np.arange(1, node_count + 1, dtype=np.int32)
-            node_coords = np.column_stack([node_lon, node_lat]).flatten()
-            node_owners = np.zeros(node_count, dtype=np.int32)  # Single processor
+                node_count = len(node_lon)
+                # ESMF/ESMPy typically expects 32-bit integers for IDs and connectivity
+                node_ids = np.arange(1, node_count + 1, dtype=np.int32)
+                node_coords = np.column_stack([node_lon, node_lat]).flatten()
+                node_owners = np.zeros(node_count, dtype=np.int32)  # Single processor
 
-            mesh.add_nodes(
-                node_count,
-                node_ids.reshape(-1, 1),
-                node_coords,  # node_coords must be 1D
-                node_owners.reshape(-1, 1),
-            )
+                mesh.add_nodes(
+                    node_count,
+                    node_ids.reshape(-1, 1),
+                    node_coords,  # node_coords must be 1D
+                    node_owners.reshape(-1, 1),
+                )
 
-            mask_arg = None
-            if mask_var and mask_var in ds:
-                # Map original cell mask to triangulated elements
-                mask_val = ds[mask_var].values
-                element_mask = mask_val[orig_idx].astype(np.int32)
-                mask_arg = element_mask.reshape(-1, 1)
+                mask_arg = None
+                if mask_var and mask_var in ds:
+                    if method == "conservative":
+                        # Map original cell mask to triangulated elements
+                        mask_val = ds[mask_var].values
+                        element_mask = mask_val[orig_idx].astype(np.int32)
+                        mask_arg = element_mask.reshape(-1, 1)
+                    else:
+                        # For bilinear/patch, mask is on nodes (handled via Field later)
+                        pass
 
-            mesh.add_elements(
-                len(element_ids),
-                np.array(element_ids, dtype=np.int32).reshape(-1, 1),
-                np.array(element_types, dtype=np.int32).reshape(-1, 1),
-                np.array(element_conn, dtype=np.int32),
-                element_mask=mask_arg,
-            )
+                mesh.add_elements(
+                    len(element_ids),
+                    np.array(element_ids, dtype=np.int32).reshape(-1, 1),
+                    np.array(element_types, dtype=np.int32).reshape(-1, 1),
+                    np.array(element_conn, dtype=np.int32),
+                    element_mask=mask_arg if method == "conservative" else None,
+                )
 
-            return mesh, provenance, orig_idx
+                return mesh, provenance, orig_idx
+            except ValueError:
+                if method == "conservative":
+                    raise
+                # Fall through to LocStream or NotImplementedError
 
-        if method not in ["nearest_s2d", "nearest_d2s"]:
+        if method not in ["nearest_s2d", "nearest_d2s", "bilinear", "patch"]:
             raise NotImplementedError(
-                f"Method '{method}' is not yet supported for unstructured grids. "
-                "Use 'nearest_s2d', 'nearest_d2s' or 'conservative' (requires mesh info)."
+                f"Method '{method}' is not yet supported for unstructured grids without connectivity info. "
+                "Use 'nearest_s2d', 'nearest_d2s', 'bilinear' or 'patch' (as target) or ensure your dataset has UGRID/MPAS mesh info for 'conservative'."
             )
         locstream = esmpy.LocStream(shape[0], coord_sys=coord_sys)
         if coord_sys == esmpy.CoordSys.CART:
@@ -729,10 +743,13 @@ def _compute_chunk_weights(
             src_obj, _, src_orig_idx = _create_esmf_grid(
                 source_ds, method, periodic, mask_var, coord_sys=coord_sys
             )
-            if isinstance(src_obj, esmpy.Mesh) and method == "conservative":
-                src_field = esmpy.Field(
-                    src_obj, name="src", meshloc=esmpy.MeshLoc.ELEMENT
+            if isinstance(src_obj, esmpy.Mesh):
+                meshloc = (
+                    esmpy.MeshLoc.ELEMENT
+                    if method == "conservative"
+                    else esmpy.MeshLoc.NODE
                 )
+                src_field = esmpy.Field(src_obj, name="src", meshloc=meshloc)
             else:
                 src_field = esmpy.Field(src_obj, name="src")
             _WORKER_CACHE[src_cache_key] = (src_field, src_orig_idx)
@@ -741,8 +758,13 @@ def _compute_chunk_weights(
         dst_obj, _, dst_orig_idx = _create_esmf_grid(
             chunk_ds, method, periodic=False, mask_var=None, coord_sys=coord_sys
         )
-        if isinstance(dst_obj, esmpy.Mesh) and method == "conservative":
-            dst_field = esmpy.Field(dst_obj, name="dst", meshloc=esmpy.MeshLoc.ELEMENT)
+        if isinstance(dst_obj, esmpy.Mesh):
+            meshloc = (
+                esmpy.MeshLoc.ELEMENT
+                if method == "conservative"
+                else esmpy.MeshLoc.NODE
+            )
+            dst_field = esmpy.Field(dst_obj, name="dst", meshloc=meshloc)
         else:
             dst_field = esmpy.Field(dst_obj, name="dst")
 
@@ -800,10 +822,10 @@ def _compute_chunk_weights(
         row_dst = weights["row_dst"] - 1
         col_src = weights["col_src"] - 1
 
-        if dst_orig_idx is not None:
+        if dst_orig_idx is not None and method == "conservative":
             row_dst = dst_orig_idx[row_dst]
 
-        if src_orig_idx is not None:
+        if src_orig_idx is not None and method == "conservative":
             col_src = src_orig_idx[col_src]
 
         rows = global_indices[row_dst]
@@ -1382,13 +1404,23 @@ class Regridder:
         self.provenance.extend(src_prov)
         self.provenance.extend(dst_prov)
 
-        if isinstance(src_obj, esmpy.Mesh) and self.method == "conservative":
-            src_field = esmpy.Field(src_obj, name="src", meshloc=esmpy.MeshLoc.ELEMENT)
+        if isinstance(src_obj, esmpy.Mesh):
+            meshloc = (
+                esmpy.MeshLoc.ELEMENT
+                if self.method == "conservative"
+                else esmpy.MeshLoc.NODE
+            )
+            src_field = esmpy.Field(src_obj, name="src", meshloc=meshloc)
         else:
             src_field = esmpy.Field(src_obj, name="src")
 
-        if isinstance(dst_obj, esmpy.Mesh) and self.method == "conservative":
-            dst_field = esmpy.Field(dst_obj, name="dst", meshloc=esmpy.MeshLoc.ELEMENT)
+        if isinstance(dst_obj, esmpy.Mesh):
+            meshloc = (
+                esmpy.MeshLoc.ELEMENT
+                if self.method == "conservative"
+                else esmpy.MeshLoc.NODE
+            )
+            dst_field = esmpy.Field(dst_obj, name="dst", meshloc=meshloc)
         else:
             dst_field = esmpy.Field(dst_obj, name="dst")
 
@@ -1431,13 +1463,13 @@ class Regridder:
 
         weights = regrid.get_weights_dict(deep_copy=True)
 
-        # Map to original indices if Mesh was triangulated
+        # Map to original indices if Mesh elements were triangulated
         row_dst = weights["row_dst"] - 1
         col_src = weights["col_src"] - 1
 
-        if dst_orig_idx is not None:
+        if dst_orig_idx is not None and self.method == "conservative":
             row_dst = dst_orig_idx[row_dst]
-        if src_orig_idx is not None:
+        if src_orig_idx is not None and self.method == "conservative":
             col_src = src_orig_idx[col_src]
 
         # Handle MPI gathering if multiple ranks are present
