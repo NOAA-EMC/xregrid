@@ -298,7 +298,16 @@ def _get_grid_bounds(
         return _bounds_to_vertices(lat_b_da), _bounds_to_vertices(lon_b_da)
     except (KeyError, AttributeError, ValueError):
         if "lat_b" in ds and "lon_b" in ds:
-            return ds["lat_b"], ds["lon_b"]
+            lat_b, lon_b = ds["lat_b"], ds["lon_b"]
+            # Only use if they have correct shape for the current grid
+            # (Aero Protocol: Robustness against non-subsetted 1D bounds)
+            try:
+                lon, lat, _, _, _ = _get_mesh_info(ds)
+                if lat_b.ndim == 1 and lat_b.size == lat.size + 1:
+                    if lon_b.ndim == 1 and lon_b.size == lon.size + 1:
+                        return lat_b, lon_b
+            except Exception:
+                pass
     return None, None
 
 
@@ -604,6 +613,11 @@ def _create_esmf_grid(
     else:
         lon_f = _to_degrees(lon).values.T
         lat_f = _to_degrees(lat).values.T
+
+        # Robustness: Clip latitudes to exactly [-90, 90] to avoid ESMF_RC_VAL_OUTOFRANGE
+        # (Aero Protocol: Scientific Hygiene)
+        lat_f = np.clip(lat_f, -90.0, 90.0)
+
         shape_f = lon_f.shape
 
         num_peri_dims = 1 if periodic else None
@@ -663,6 +677,9 @@ def _create_esmf_grid(
 
             lon_b_vals_f = lon_b_vals.T
             lat_b_vals_f = lat_b_vals.T
+
+            # Robustness: Clip latitude bounds
+            lat_b_vals_f = np.clip(lat_b_vals_f, -90.0, 90.0)
 
             if periodic:
                 lon_b_vals_f = lon_b_vals_f[:-1, :]
@@ -800,6 +817,15 @@ def _compute_chunk_weights(
         # 4. Generate weights
         regrid = esmpy.Regrid(src_field, dst_field, **regrid_kwargs)
         weights = regrid.get_weights_dict(deep_copy=True)
+
+        # Explicitly destroy objects to avoid memory leaks in long-running workers
+        # (Aero Protocol: Worker Robustness)
+        regrid.destroy()
+        dst_field.destroy()
+        if not isinstance(dst_obj, esmpy.Mesh):
+            # For meshes, we don't want to destroy the mesh itself if it might be reused
+            # but for Grid/LocStream it's safer to recreate or destroy.
+            dst_obj.destroy()
 
         # 5. Map local destination indices to global grid indices
         if isinstance(dest_slice_info, np.ndarray):
@@ -1225,10 +1251,44 @@ class Regridder:
         )
 
     def _normalize_grid(self, ds: xr.Dataset) -> Tuple[xr.Dataset, bool]:
-        """Internally sort rectilinear coordinates to be ascending."""
+        """
+        Internally sort rectilinear coordinates and ensure bounds are CF-compliant.
+
+        Ensures that latitude and longitude coordinates are ascending and that
+        cell boundaries (bounds) are stored in a format that shares dimensions
+        with the grid (e.g., (N, 2) instead of (N+1)). This ensures that bounds
+        are correctly subsetted during Dask parallelization and sorted.
+        """
         was_sorted = False
         try:
-            # Only for rectilinear 1D coordinates
+            # 1. Ensure bounds are CF-compliant (N, 2) and share dimensions
+            # This is critical for Dask subsetting and sorting.
+            try:
+                # Identify if we have bounds that need conversion
+                for axis in ["latitude", "longitude"]:
+                    try:
+                        coord = ds.cf[axis]
+                        bounds_name = coord.attrs.get("bounds")
+                        if bounds_name and bounds_name in ds:
+                            bounds = ds[bounds_name]
+                            # If bounds are 1D (N+1), convert to (N, 2)
+                            if bounds.ndim == 1 and bounds.size == coord.size + 1:
+                                old_bounds_name = bounds_name
+                                ds = ds.cf.add_bounds(axis)
+                                new_bounds_name = ds.cf[axis].attrs.get("bounds")
+                                if (
+                                    new_bounds_name
+                                    and new_bounds_name != old_bounds_name
+                                    and old_bounds_name in ds
+                                ):
+                                    ds = ds.drop_vars(old_bounds_name)
+                    except (KeyError, AttributeError):
+                        continue
+            except Exception:
+                # Fallback: if cf-xarray fails, continue with original ds
+                pass
+
+            # 2. Sort rectilinear coordinates to be ascending
             lat_da = ds.cf["latitude"]
             lon_da = ds.cf["longitude"]
 
@@ -2310,27 +2370,15 @@ class Regridder:
 
                 # Check if workers already have this matrix in their cache
                 if (client, weights_key_arg) not in _DRIVER_CACHE:
-                    if hasattr(self._weights_matrix, "key"):
-                        # Truly Distributed: matrix is already a Future on the cluster.
-                        # We ensure weights are available on ALL workers (Aero Protocol: Scalability)
-                        client.replicate(self._weights_matrix)
+                    # Robust cache population: use run() to ensure all current workers have the data.
+                    # We gather Futures on the driver once to avoid passing Futures to run(),
+                    # as run() does not automatically resolve them on workers.
+                    # (Aero Protocol: Scalability & Robustness)
+                    data_to_send = self._weights_matrix
+                    if hasattr(data_to_send, "key"):
+                        data_to_send = client.gather(data_to_send)
 
-                        # Explicitly target all workers to ensure cache consistency
-                        workers = list(client.scheduler_info()["workers"].keys())
-                        if workers:
-                            client.gather(
-                                client.map(
-                                    _populate_cache_task,
-                                    [self._weights_matrix] * len(workers),
-                                    [weights_key_arg] * len(workers),
-                                    workers=workers,
-                                )
-                            )
-                    else:
-                        # Eager matrix: use run (will gather if not careful, but it's local)
-                        client.run(
-                            _setup_worker_cache, weights_key_arg, self._weights_matrix
-                        )
+                    client.run(_setup_worker_cache, weights_key_arg, data_to_send)
                     _DRIVER_CACHE[(client, weights_key_arg)] = True
                 weights_arg = weights_key_arg
 
@@ -2341,20 +2389,11 @@ class Regridder:
                         tw_key = f"tw_{id(self._total_weights)}"
 
                     if (client, tw_key) not in _DRIVER_CACHE:
-                        if hasattr(self._total_weights, "key"):
-                            client.replicate(self._total_weights)
-                            workers = list(client.scheduler_info()["workers"].keys())
-                            if workers:
-                                client.gather(
-                                    client.map(
-                                        _populate_cache_task,
-                                        [self._total_weights] * len(workers),
-                                        [tw_key] * len(workers),
-                                        workers=workers,
-                                    )
-                                )
-                        else:
-                            client.run(_setup_worker_cache, tw_key, self._total_weights)
+                        data_tw = self._total_weights
+                        if hasattr(data_tw, "key"):
+                            data_tw = client.gather(data_tw)
+
+                        client.run(_setup_worker_cache, tw_key, data_tw)
                         _DRIVER_CACHE[(client, tw_key)] = True
                     total_weights_arg = tw_key
 
