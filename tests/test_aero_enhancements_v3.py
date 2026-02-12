@@ -58,8 +58,18 @@ def test_mutual_recursion_safety():
     lat = src_grid.lat
     lon = src_grid.lon
 
-    da1 = xr.DataArray(np.random.rand(6, 12), dims=("lat", "lon"), coords={"lat": lat, "lon": lon}, name="da1")
-    da2 = xr.DataArray(np.random.rand(6, 12), dims=("lat", "lon"), coords={"lat": lat, "lon": lon}, name="da2")
+    da1 = xr.DataArray(
+        np.random.rand(6, 12),
+        dims=("lat", "lon"),
+        coords={"lat": lat, "lon": lon},
+        name="da1",
+    )
+    da2 = xr.DataArray(
+        np.random.rand(6, 12),
+        dims=("lat", "lon"),
+        coords={"lat": lat, "lon": lon},
+        name="da2",
+    )
 
     # Manually create mutual reference in coords (possible in xarray)
     da1 = da1.assign_coords(other=da2)
@@ -79,6 +89,7 @@ def test_plot_diagnostics_dispatch():
     # We mock the actual plotting calls to avoid needing a GUI/display
     try:
         import matplotlib.pyplot as plt
+
         # Test static
         fig = regridder.plot_diagnostics(mode="static")
         assert fig is not None
@@ -89,6 +100,7 @@ def test_plot_diagnostics_dispatch():
     # Test interactive (we check if it calls hvplot, but we don't need to render it)
     try:
         import hvplot.xarray  # noqa: F401
+
         layout = regridder.plot_diagnostics(mode="interactive")
         assert layout is not None
     except ImportError:
