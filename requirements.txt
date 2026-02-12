@@ -1,0 +1,9 @@
+# This file is auto-generated from pyproject.toml. Do not edit directly.
+xarray
+numpy
+scipy
+dask
+netCDF4
+esmpy
+cf-xarray
+pyproj

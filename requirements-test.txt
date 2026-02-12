@@ -1,0 +1,6 @@
+# This file is auto-generated from pyproject.toml [test]. Do not edit directly.
+pytest
+pytest-benchmark
+pytest-mock
+pooch
+pre-commit

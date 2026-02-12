@@ -5,3 +5,12 @@ repos:
     -   id: ruff
         args: [ --fix ]
     -   id: ruff-format
+
+-   repo: local
+    hooks:
+    -   id: generate-requirements
+        name: generate-requirements
+        entry: python3 scripts/generate_requirements.py
+        language: system
+        files: ^pyproject\.toml$
+        pass_filenames: false

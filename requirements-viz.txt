@@ -1,0 +1,5 @@
+# This file is auto-generated from pyproject.toml [viz]. Do not edit directly.
+matplotlib
+cartopy
+hvplot
+geoviews

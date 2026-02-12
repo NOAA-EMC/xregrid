@@ -1,0 +1,9 @@
+# This file is auto-generated from pyproject.toml. Do not edit directly.
+# It omits esmpy to support custom ESMF installations.
+xarray
+numpy
+scipy
+dask
+netCDF4
+cf-xarray
+pyproj
