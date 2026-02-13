@@ -7,11 +7,13 @@ from xregrid import Regridder, create_global_grid, create_mesh_from_coords
 # Check for real ESMF
 try:
     import esmpy
+
     if hasattr(esmpy, "_is_mock") or "unittest.mock" in str(type(esmpy)):
         raise ImportError
     HAS_REAL_ESMF = True
 except ImportError:
     HAS_REAL_ESMF = False
+
 
 @pytest.fixture(scope="module")
 def dask_client():
@@ -23,6 +25,7 @@ def dask_client():
     yield client
     client.close()
     cluster.close()
+
 
 def test_regrid_structured_to_unstructured_dask(dask_client):
     source_grid = create_global_grid(10, 10)
@@ -48,6 +51,7 @@ def test_regrid_structured_to_unstructured_dask(dask_client):
     assert "lat" in res.coords
     assert "lon" in res.coords
 
+
 def test_regrid_unstructured_to_structured_dask(dask_client):
     n_pts = 50
     lon = np.linspace(0, 360, n_pts)
@@ -65,6 +69,7 @@ def test_regrid_unstructured_to_structured_dask(dask_client):
     assert res.shape == (target_grid.sizes["lat"], target_grid.sizes["lon"])
     assert "lat" in res.dims
     assert "lon" in res.dims
+
 
 def test_regrid_unstructured_to_unstructured_dask(dask_client):
     n_pts_src = 50

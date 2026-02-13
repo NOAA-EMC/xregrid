@@ -11,9 +11,14 @@ def is_esmpy_mocked():
     try:
         import esmpy
 
-        return hasattr(esmpy, "_is_mock") or isinstance(esmpy, MagicMock) or "MagicMock" in str(type(esmpy))
+        return (
+            hasattr(esmpy, "_is_mock")
+            or isinstance(esmpy, MagicMock)
+            or "MagicMock" in str(type(esmpy))
+        )
     except ImportError:
         return True
+
 
 HAS_REAL_ESMF = not is_esmpy_mocked()
 pytestmark = pytest.mark.skipif(not HAS_REAL_ESMF, reason="esmpy is missing or mocked")

@@ -1,17 +1,18 @@
 import numpy as np
 import xarray as xr
-import pytest
 from xregrid import Regridder, create_global_grid
 from unittest.mock import MagicMock
 
 # Check for real ESMF
 try:
     import esmpy
+
     if hasattr(esmpy, "_is_mock") or "unittest.mock" in str(type(esmpy)):
         raise ImportError
     HAS_REAL_ESMF = True
 except ImportError:
     HAS_REAL_ESMF = False
+
 
 class UxDatasetMock:
     def __init__(self, ds, uxgrid):
@@ -39,6 +40,7 @@ class UxDatasetMock:
     @property
     def sizes(self):
         return self._ds.sizes
+
 
 def test_uxarray_support():
     # 1. Create a mocked uxarray object

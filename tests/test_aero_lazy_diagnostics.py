@@ -1,4 +1,3 @@
-import numpy as np
 import pytest
 import dask.distributed
 from xregrid import Regridder, create_global_grid
@@ -6,11 +5,13 @@ from xregrid import Regridder, create_global_grid
 # Check for real ESMF
 try:
     import esmpy
+
     if hasattr(esmpy, "_is_mock") or "unittest.mock" in str(type(esmpy)):
         raise ImportError
     HAS_REAL_ESMF = True
 except ImportError:
     HAS_REAL_ESMF = False
+
 
 @pytest.fixture(scope="module")
 def dask_client():
@@ -22,6 +23,7 @@ def dask_client():
     yield client
     client.close()
     cluster.close()
+
 
 def test_lazy_diagnostics_distributed(dask_client):
     """
@@ -55,6 +57,7 @@ def test_lazy_diagnostics_distributed(dask_client):
     assert report_heavy["n_weights"] != -1
     assert "unmapped_count" in report_heavy
 
+
 def test_diagnostics_distributed_identity():
     """
     Verify that Eager and Lazy diagnostic values have identical shapes.
@@ -78,6 +81,7 @@ def test_diagnostics_distributed_identity():
     assert diag_eager.weight_sum.shape == diag_lazy.weight_sum.shape
     # Verify we have some weights
     assert diag_lazy.weight_sum.sum() > 0
+
 
 if __name__ == "__main__":
     pytest.main([__file__])

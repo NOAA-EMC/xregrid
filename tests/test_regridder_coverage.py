@@ -3,7 +3,8 @@ import pytest
 import xarray as xr
 import numpy as np
 from xregrid import Regridder, create_global_grid
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
 
 def test_regridder_mpi_parallel_error():
     """Verify ValueError when both mpi and parallel are True."""
@@ -11,6 +12,7 @@ def test_regridder_mpi_parallel_error():
     tgt = create_global_grid(5, 5)
     with pytest.raises(ValueError, match="Cannot use both MPI and Dask"):
         Regridder(src, tgt, mpi=True, parallel=True)
+
 
 def test_regridder_missing_dask_error():
     """Verify ImportError when parallel=True but dask.distributed is missing."""
@@ -20,6 +22,7 @@ def test_regridder_missing_dask_error():
         with pytest.raises(ImportError, match="Dask distributed is required"):
             Regridder(src, tgt, parallel=True)
 
+
 def test_regridder_save_load_weights(tmp_path):
     """Verify saving and loading weights."""
     src = create_global_grid(10, 10)
@@ -27,7 +30,7 @@ def test_regridder_save_load_weights(tmp_path):
     weight_file = str(tmp_path / "weights.nc")
 
     # Weights are saved automatically if reuse_weights=True and file doesn't exist
-    regridder = Regridder(src, tgt, method="bilinear", filename=weight_file, reuse_weights=True)
+    Regridder(src, tgt, method="bilinear", filename=weight_file, reuse_weights=True)
     assert os.path.exists(weight_file)
 
     # Load weights
@@ -37,6 +40,7 @@ def test_regridder_save_load_weights(tmp_path):
     # Verify validation fails with wrong parameters
     with pytest.raises(ValueError, match="does not match loaded weights method"):
         Regridder.from_weights(weight_file, src, tgt, method="conservative")
+
 
 def test_regrid_dataset_coverage():
     """Verify _regrid_dataset with various variable types."""
@@ -48,13 +52,9 @@ def test_regrid_dataset_coverage():
             "var1": (["lat", "lon"], np.random.rand(18, 36)),
             "var2": (["lat", "lon"], np.random.rand(18, 36)),
             "scalar": 42,
-            "other": (["time"], [1, 2, 3])
+            "other": (["time"], [1, 2, 3]),
         },
-        coords={
-            "lat": src.lat,
-            "lon": src.lon,
-            "time": [0, 1, 2]
-        }
+        coords={"lat": src.lat, "lon": src.lon, "time": [0, 1, 2]},
     )
 
     regridder = Regridder(src, tgt)
@@ -67,6 +67,7 @@ def test_regrid_dataset_coverage():
     # create_global_grid(5, 5) gives (36, 72)
     assert res.var1.shape == (36, 72)
 
+
 def test_extrap_methods_coverage():
     """Verify different extrapolation methods."""
     src = create_global_grid(10, 10)
@@ -75,6 +76,7 @@ def test_extrap_methods_coverage():
     for method in ["nearest_s2d", "nearest_idw", "creep_fill"]:
         regridder = Regridder(src, tgt, extrap_method=method, extrap_dist_exponent=3.0)
         assert regridder.extrap_method == method
+
 
 def test_regridder_repr_lazy():
     """Verify __repr__ with lazy weights."""
@@ -94,6 +96,7 @@ def test_regridder_repr_lazy():
 
     repr_str = repr(regridder)
     assert "quality=lazy" in repr_str
+
 
 def test_regridder_quality_report_coverage():
     """Verify quality_report with different options."""

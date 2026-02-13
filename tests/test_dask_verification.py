@@ -1,17 +1,18 @@
 import xarray as xr
 import numpy as np
-import pytest
 import dask.distributed
 from xregrid import Regridder, create_global_grid
 
 # Check for real ESMF
 try:
     import esmpy
+
     if hasattr(esmpy, "_is_mock") or "unittest.mock" in str(type(esmpy)):
         raise ImportError
     HAS_REAL_ESMF = True
 except ImportError:
     HAS_REAL_ESMF = False
+
 
 def test_dask_parallel_regridding():
     """
@@ -43,6 +44,7 @@ def test_dask_parallel_regridding():
         except Exception as e:
             print(f"ERROR in Regridder creation: {e}")
             import traceback
+
             traceback.print_exc()
             raise
 
@@ -106,6 +108,7 @@ def test_dask_parallel_regridding():
     finally:
         client.close()
         cluster.close()
+
 
 def test_dask_curvilinear_parallel():
     """

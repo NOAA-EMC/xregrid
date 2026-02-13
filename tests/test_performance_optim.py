@@ -1,10 +1,9 @@
 import numpy as np
-import pytest
 from xregrid.core import _apply_weights_core, _WORKER_CACHE, _matmul
 from scipy.sparse import csr_matrix
-from unittest.mock import MagicMock
 import dask.distributed
 import xarray as xr
+
 
 def test_stationary_mask_caching(mocker):
     """Verify that stationary mask normalization is cached across calls."""
@@ -49,6 +48,7 @@ def test_stationary_mask_caching(mocker):
     # Verify results are identical
     np.testing.assert_allclose(res1, res2)
 
+
 def test_memory_efficiency_broadcasting():
     """Verify that stationary mask uses broadcasting."""
     data = np.ones((10, 4, 4), dtype=np.float32)
@@ -61,6 +61,7 @@ def test_memory_efficiency_broadcasting():
     assert res.shape == (10, 2, 2)
     assert np.isnan(res[0, 0, 0])
     assert res[0, 1, 1] == 1.0
+
 
 def test_dask_stationary_mask_caching(mocker):
     """Verify stationary mask caching works with Dask-backed data."""
@@ -91,7 +92,8 @@ def test_dask_stationary_mask_caching(mocker):
 
         # Use classes instead of MagicMock for mesh info to avoid pickling recursion
         class MockObj:
-            def __init__(self, name): self.name = name
+            def __init__(self, name):
+                self.name = name
 
         # Mock Regridder internally
         mocker.patch("xregrid.regridder.Regridder._generate_weights", return_value=None)

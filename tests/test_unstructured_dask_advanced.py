@@ -7,11 +7,13 @@ from xregrid import Regridder, create_global_grid, create_mesh_from_coords
 # Check for real ESMF
 try:
     import esmpy
+
     if hasattr(esmpy, "_is_mock") or "unittest.mock" in str(type(esmpy)):
         raise ImportError
     HAS_REAL_ESMF = True
 except ImportError:
     HAS_REAL_ESMF = False
+
 
 @pytest.fixture(scope="module")
 def dask_client():
@@ -23,6 +25,7 @@ def dask_client():
     yield client
     client.close()
     cluster.close()
+
 
 def test_unstructured_with_mask_dask(dask_client):
     n_pts = 20
@@ -54,6 +57,7 @@ def test_unstructured_with_mask_dask(dask_client):
     val = res.compute()
     assert not np.isnan(val).all()
 
+
 def test_mpas_like_detection_dask(dask_client):
     nCells = 50
     ds = xr.Dataset(
@@ -67,6 +71,7 @@ def test_mpas_like_detection_dask(dask_client):
     regridder = Regridder(ds, target_grid, method="nearest_s2d", parallel=True)
     res = regridder(ds["test_var"])
     assert res.shape == (target_grid.sizes["lat"], target_grid.sizes["lon"])
+
 
 def test_unstructured_radians_dask(dask_client):
     n_pts = 20
@@ -84,6 +89,7 @@ def test_unstructured_radians_dask(dask_client):
     res = regridder(source_grid["test_var"])
     assert res.shape == (target_grid.sizes["lat"], target_grid.sizes["lon"])
 
+
 def test_structured_to_unstructured_mask_dask(dask_client):
     source_grid = create_global_grid(10, 10)
     source_grid["mask"] = (["lat", "lon"], np.ones((18, 36), dtype=int))
@@ -91,7 +97,9 @@ def test_structured_to_unstructured_mask_dask(dask_client):
     target_grid = create_mesh_from_coords(
         np.linspace(0, 360, n_pts), np.linspace(-90, 90, n_pts), crs="EPSG:4326"
     )
-    regridder = Regridder(source_grid, target_grid, method="nearest_s2d", mask_var="mask", parallel=True)
+    regridder = Regridder(
+        source_grid, target_grid, method="nearest_s2d", mask_var="mask", parallel=True
+    )
     data = xr.DataArray(
         np.random.rand(18, 36),
         coords={"lat": source_grid.lat, "lon": source_grid.lon},
@@ -101,6 +109,7 @@ def test_structured_to_unstructured_mask_dask(dask_client):
     assert res.shape == (n_pts,)
     val = res.compute()
     assert val.shape == (n_pts,)
+
 
 def test_mpas_conservative_regrid_dask(dask_client):
     if HAS_REAL_ESMF:
@@ -112,7 +121,10 @@ def test_mpas_conservative_regrid_dask(dask_client):
             "lonCell": (["nCells"], np.linspace(0, 360, nCells)),
             "latVertex": (["nVertices"], np.linspace(-90, 90, nVertices)),
             "lonVertex": (["nVertices"], np.linspace(0, 360, nVertices)),
-            "verticesOnCell": (["nCells", "maxNodes"], np.random.randint(1, nVertices + 1, (nCells, 6))),
+            "verticesOnCell": (
+                ["nCells", "maxNodes"],
+                np.random.randint(1, nVertices + 1, (nCells, 6)),
+            ),
             "nEdgesOnCell": (["nCells"], np.full(nCells, 6)),
         }
     )
@@ -124,6 +136,7 @@ def test_mpas_conservative_regrid_dask(dask_client):
     val = res.compute()
     assert not np.isnan(val).all()
 
+
 def test_ugrid_conservative_regrid_dask(dask_client):
     if HAS_REAL_ESMF:
         pytest.skip("UGRID conservative regridding requires valid mesh.")
@@ -134,7 +147,10 @@ def test_ugrid_conservative_regrid_dask(dask_client):
             "lon_node": (["nNodes"], np.linspace(0, 360, nNodes)),
             "lat": (["nFaces"], np.linspace(-90, 90, nFaces)),
             "lon": (["nFaces"], np.linspace(0, 360, nFaces)),
-            "face_node_connectivity": (["nFaces", "nMaxNodes"], np.random.randint(0, nNodes, (nFaces, 4))),
+            "face_node_connectivity": (
+                ["nFaces", "nMaxNodes"],
+                np.random.randint(0, nNodes, (nFaces, 4)),
+            ),
         }
     )
     ds["face_node_connectivity"].attrs["cf_role"] = "face_node_connectivity"

@@ -7,11 +7,13 @@ from xregrid import Regridder, create_global_grid
 # Check for real ESMF
 try:
     import esmpy
+
     if hasattr(esmpy, "_is_mock") or "unittest.mock" in str(type(esmpy)):
         raise ImportError
     HAS_REAL_ESMF = True
 except ImportError:
     HAS_REAL_ESMF = False
+
 
 @pytest.fixture(scope="module")
 def dask_client():
@@ -26,6 +28,7 @@ def dask_client():
     yield client
     client.close()
     cluster.close()
+
 
 def test_aero_distributed_optimization_identity(dask_client):
     """
@@ -96,6 +99,7 @@ def test_aero_distributed_optimization_identity(dask_client):
 
     if HAS_REAL_ESMF:
         xr.testing.assert_allclose(res_skipna_eager, res_skipna_lazy)
+
 
 def test_aero_vectorized_triangulation():
     """Verify the new vectorized triangulation logic for MPAS/UGRID."""
