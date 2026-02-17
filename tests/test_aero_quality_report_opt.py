@@ -4,6 +4,7 @@ import xarray as xr
 from xregrid import Regridder, create_global_grid
 from unittest.mock import MagicMock, patch, PropertyMock
 
+
 def test_quality_report_no_gather_distributed(mocker):
     """
     Aero Protocol: Verify that quality_report avoids gathering the full weight matrix.
@@ -41,7 +42,7 @@ def test_quality_report_no_gather_distributed(mocker):
             "weight_sum": (["lat", "lon"], np.ones((6, 12))),
             "unmapped_mask": (["lat", "lon"], np.zeros((6, 12))),
         },
-        coords={"lat": np.arange(6), "lon": np.arange(12)}
+        coords={"lat": np.arange(6), "lon": np.arange(12)},
     )
     mocker.patch.object(regridder, "diagnostics", return_value=mock_diag)
 
@@ -59,6 +60,7 @@ def test_quality_report_no_gather_distributed(mocker):
     # Check that diagnostics was used for other metrics
     assert report["unmapped_count"] == 0
 
+
 def test_quality_report_eager_fallback():
     """Verify that quality_report still works correctly for eager NumPy weights."""
     src_grid = create_global_grid(30, 30)
@@ -68,6 +70,7 @@ def test_quality_report_eager_fallback():
     report = regridder.quality_report()
     assert report["n_weights"] > 0
     assert "unmapped_count" in report
+
 
 if __name__ == "__main__":
     pytest.main([__file__])

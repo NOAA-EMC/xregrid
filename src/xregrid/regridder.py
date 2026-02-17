@@ -1107,7 +1107,9 @@ class Regridder:
                     import dask.distributed
 
                     client = self._dask_client or dask.distributed.get_client()
-                    n_weights_future = client.submit(_get_nnz_task, self._weights_matrix)
+                    n_weights_future = client.submit(
+                        _get_nnz_task, self._weights_matrix
+                    )
                     # We wait for the scalar result (Aero Protocol: Expected block for reports)
                     n_weights = int(n_weights_future.result())
                 except (ImportError, ValueError, AttributeError):
