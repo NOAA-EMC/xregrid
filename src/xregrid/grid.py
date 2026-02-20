@@ -67,6 +67,13 @@ def _get_mesh_info(
 
             # If they share same dim, it's unstructured
             if lat.dims == lon.dims:
+                # Apply filtering before returning
+                lat_isel = {d: 0 for d in non_spatial_dims if d in lat.dims}
+                lon_isel = {d: 0 for d in non_spatial_dims if d in lon.dims}
+                if lat_isel:
+                    lat = lat.isel(lat_isel, drop=True)
+                if lon_isel:
+                    lon = lon.isel(lon_isel, drop=True)
                 return lon, lat, lat.shape, lat.dims, True
         except (AttributeError, KeyError):
             pass

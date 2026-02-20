@@ -220,3 +220,99 @@ def test_regridder_vertical_dimension_detection():
     res = regridder(da)
     assert "lev" in res.dims
     assert res.shape == (3, 5, 10)
+
+
+def test_regridder_ugrid_with_time():
+    # Setup mocked uxarray object with time dimension
+    from unittest.mock import MagicMock
+
+    class UxDatasetMock:
+        def __init__(self, ds, uxgrid):
+            self._ds = ds
+            self.uxgrid = uxgrid
+
+        def __getattr__(self, name):
+            return getattr(self._ds, name)
+
+        def __getitem__(self, key):
+            return self._ds[key]
+
+        @property
+        def data_vars(self):
+            return self._ds.data_vars
+
+        @property
+        def coords(self):
+            return self._ds.coords
+
+        @property
+        def dims(self):
+            return self._ds.dims
+
+        @property
+        def sizes(self):
+            return self._ds.sizes
+
+    n_face = 10
+    n_node = 12
+    times = [np.datetime64("2020-01-01")]
+
+    mock_uxgrid = MagicMock()
+    mock_uxgrid.node_lat = xr.DataArray(np.linspace(-90, 90, n_node), dims=["n_node"])
+    mock_uxgrid.node_lon = xr.DataArray(np.linspace(0, 360, n_node), dims=["n_node"])
+    # face coords with time dimension (moving mesh case, though xregrid assumes static)
+    mock_uxgrid.face_lat = xr.DataArray(
+        np.broadcast_to(np.linspace(-90, 90, n_face), (1, n_face)),
+        dims=["time", "n_face"],
+        coords={"time": times},
+    )
+    mock_uxgrid.face_lon = xr.DataArray(
+        np.broadcast_to(np.linspace(0, 360, n_face), (1, n_face)),
+        dims=["time", "n_face"],
+        coords={"time": times},
+    )
+
+    # Create connectivity
+    conn = np.zeros((n_face, 3), dtype=int)
+    for i in range(n_face):
+        conn[i] = [i, i + 1, (i + 2) % n_node]
+
+    mock_uxgrid.face_node_connectivity = xr.DataArray(
+        conn, dims=["n_face", "n_max_face_nodes"]
+    )
+    mock_uxgrid.face_node_connectivity.attrs["start_index"] = 0
+    mock_uxgrid.face_node_connectivity.attrs["_FillValue"] = -1
+
+    # Mock UxDataset with time-varying variable
+    ds_base = xr.Dataset(
+        {"test_var": (["time", "n_face"], np.random.rand(1, n_face))},
+        coords={"time": (["time"], times, {"standard_name": "time"})},
+    )
+    ds = UxDatasetMock(ds_base, mock_uxgrid)
+
+    target_grid = xr.Dataset(
+        coords={
+            "lat": (
+                ["lat"],
+                np.linspace(-90, 90, 5),
+                {"units": "degrees_north", "standard_name": "latitude"},
+            ),
+            "lon": (
+                ["lon"],
+                np.linspace(0, 360, 10),
+                {"units": "degrees_east", "standard_name": "longitude"},
+            ),
+        }
+    )
+
+    regridder = Regridder(ds, target_grid, method="nearest_s2d")
+
+    # Verify time was detected as non-spatial
+    assert "time" not in regridder._dims_source
+    assert regridder._dims_source == ("n_face",)
+
+    # Regrid DataArray
+    res = regridder(ds["test_var"])
+
+    assert "time" in res.dims
+    assert res.shape == (1, 5, 10)
