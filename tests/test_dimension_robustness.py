@@ -316,3 +316,120 @@ def test_regridder_ugrid_with_time():
 
     assert "time" in res.dims
     assert res.shape == (1, 5, 10)
+
+
+def test_regridder_raw_ugrid_with_time():
+    n_face = 10
+    n_node = 12
+    times = [np.datetime64("2020-01-01")]
+
+    # Create a raw dataset following UGRID convention
+    conn = np.zeros((n_face, 3), dtype=int)
+    for i in range(n_face):
+        conn[i] = [i, (i + 1) % n_node, (i + 2) % n_node]
+
+    ds = xr.Dataset(
+        data_vars={
+            "temp": (["time", "n_face"], np.random.rand(1, n_face)),
+            "face_node_connectivity": (["n_face", "n_max_face_nodes"], conn),
+        },
+        coords={
+            "time": (["time"], times, {"standard_name": "time"}),
+            "lat_face": (
+                ["time", "n_face"],
+                np.broadcast_to(np.linspace(-90, 90, n_face), (1, n_face)),
+                {"units": "degrees_north"},
+            ),
+            "lon_face": (
+                ["time", "n_face"],
+                np.broadcast_to(np.linspace(0, 360, n_face), (1, n_face)),
+                {"units": "degrees_east"},
+            ),
+            "lat_node": (
+                ["time", "n_node"],
+                np.broadcast_to(np.linspace(-90, 90, n_node), (1, n_node)),
+                {"units": "degrees_north"},
+            ),
+            "lon_node": (
+                ["time", "n_node"],
+                np.broadcast_to(np.linspace(0, 360, n_node), (1, n_node)),
+                {"units": "degrees_east"},
+            ),
+        },
+    )
+
+    ds.face_node_connectivity.attrs["cf_role"] = "face_node_connectivity"
+    ds.face_node_connectivity.attrs["start_index"] = 0
+
+    from xregrid import create_global_grid
+
+    target_grid = create_global_grid(10, 10)
+
+    regridder = Regridder(ds, target_grid, method="nearest_s2d")
+
+    assert "time" not in regridder._dims_source
+    # Since it is UGRID, it should have detected n_face as the spatial dimension for variables
+    assert "n_face" in regridder._dims_source
+
+    res = regridder(ds["temp"])
+    assert "time" in res.dims
+    assert res.shape == (1, 18, 36)
+
+
+def test_regridder_raw_ugrid_conservative_with_time():
+    n_face = 10
+    n_node = 12
+    times = [np.datetime64("2020-01-01")]
+
+    # Create a raw dataset following UGRID convention for conservative regridding
+    # Conservative needs faces and nodes (for connectivity)
+    conn = np.zeros((n_face, 3), dtype=int)
+    for i in range(n_face):
+        conn[i] = [i, (i + 1) % n_node, (i + 2) % n_node]
+
+    ds = xr.Dataset(
+        data_vars={
+            "temp": (["time", "n_face"], np.random.rand(1, n_face)),
+            "face_node_connectivity": (["n_face", "n_max_face_nodes"], conn),
+        },
+        coords={
+            "time": (["time"], times, {"standard_name": "time"}),
+            "lat_node": (
+                ["time", "n_node"],
+                np.broadcast_to(np.linspace(-90, 90, n_node), (1, n_node)),
+                {"units": "degrees_north"},
+            ),
+            "lon_node": (
+                ["time", "n_node"],
+                np.broadcast_to(np.linspace(0, 360, n_node), (1, n_node)),
+                {"units": "degrees_east"},
+            ),
+            "lat_face": (
+                ["time", "n_face"],
+                np.broadcast_to(np.linspace(-90, 90, n_face), (1, n_face)),
+                {"units": "degrees_north"},
+            ),
+            "lon_face": (
+                ["time", "n_face"],
+                np.broadcast_to(np.linspace(0, 360, n_face), (1, n_face)),
+                {"units": "degrees_east"},
+            ),
+        },
+    )
+
+    ds.face_node_connectivity.attrs["cf_role"] = "face_node_connectivity"
+    ds.face_node_connectivity.attrs["start_index"] = 0
+
+    from xregrid import create_global_grid
+
+    target_grid = create_global_grid(10, 10)
+
+    # This should trigger _get_unstructured_mesh_info
+    regridder = Regridder(ds, target_grid, method="conservative")
+
+    assert "time" not in regridder._dims_source
+    assert "n_face" in regridder._dims_source
+
+    res = regridder(ds["temp"])
+    assert "time" in res.dims
+    assert res.shape == (1, 18, 36)
