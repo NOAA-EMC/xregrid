@@ -1,32 +1,47 @@
-
 import numpy as np
 import xarray as xr
-import pytest
 from xregrid import Regridder
+
 
 def test_regridder_time_dimension_detection():
     # Setup source and target grids with time
     lats = np.linspace(-90, 90, 10)
     lons = np.linspace(0, 360, 20)
-    times = [np.datetime64('2020-01-01')]
+    times = [np.datetime64("2020-01-01")]
 
     src_ds = xr.Dataset(
         coords={
             "time": (["time"], times, {"standard_name": "time"}),
-            "lat": (["time", "lat"], np.broadcast_to(lats, (1, 10)), {"units": "degrees_north", "standard_name": "latitude"}),
-            "lon": (["lon"], lons, {"units": "degrees_east", "standard_name": "longitude"}),
+            "lat": (
+                ["time", "lat"],
+                np.broadcast_to(lats, (1, 10)),
+                {"units": "degrees_north", "standard_name": "latitude"},
+            ),
+            "lon": (
+                ["lon"],
+                lons,
+                {"units": "degrees_east", "standard_name": "longitude"},
+            ),
         }
     )
 
     tgt_ds = xr.Dataset(
         coords={
-            "lat": (["lat"], np.linspace(-90, 90, 5), {"units": "degrees_north", "standard_name": "latitude"}),
-            "lon": (["lon"], np.linspace(0, 360, 10), {"units": "degrees_east", "standard_name": "longitude"}),
+            "lat": (
+                ["lat"],
+                np.linspace(-90, 90, 5),
+                {"units": "degrees_north", "standard_name": "latitude"},
+            ),
+            "lon": (
+                ["lon"],
+                np.linspace(0, 360, 10),
+                {"units": "degrees_east", "standard_name": "longitude"},
+            ),
         }
     )
 
     # This should now work without failing during weight generation
-    regridder = Regridder(src_ds, tgt_ds, method='bilinear')
+    regridder = Regridder(src_ds, tgt_ds, method="bilinear")
 
     # Create data with time and vertical dimensions
     levs = np.arange(5)
@@ -40,7 +55,7 @@ def test_regridder_time_dimension_detection():
             "lon": (["lon"], lons),
         },
         dims=("time", "lev", "lat", "lon"),
-        name="temp"
+        name="temp",
     )
 
     # Regrid DataArray
@@ -61,24 +76,41 @@ def test_regridder_time_dimension_detection():
     assert res_ds["temp"].shape == (1, 5, 5, 10)
     assert res_ds["time_var"].dims == ("time",)
 
+
 def test_regridder_dtype_time_fallback():
     # Setup with time-like dtype but non-standard name
     lats = np.linspace(-90, 90, 10)
     lons = np.linspace(0, 360, 20)
-    times = [np.datetime64('2020-01-01')]
+    times = [np.datetime64("2020-01-01")]
 
     src_ds = xr.Dataset(
         coords={
-            "mytime": (["mytime"], times), # Non-standard name, no CF attributes
-            "lat": (["mytime", "lat"], np.broadcast_to(lats, (1, 10)), {"units": "degrees_north", "standard_name": "latitude"}),
-            "lon": (["lon"], lons, {"units": "degrees_east", "standard_name": "longitude"}),
+            "mytime": (["mytime"], times),  # Non-standard name, no CF attributes
+            "lat": (
+                ["mytime", "lat"],
+                np.broadcast_to(lats, (1, 10)),
+                {"units": "degrees_north", "standard_name": "latitude"},
+            ),
+            "lon": (
+                ["lon"],
+                lons,
+                {"units": "degrees_east", "standard_name": "longitude"},
+            ),
         }
     )
 
     tgt_ds = xr.Dataset(
         coords={
-            "lat": (["lat"], np.linspace(-90, 90, 5), {"units": "degrees_north", "standard_name": "latitude"}),
-            "lon": (["lon"], np.linspace(0, 360, 10), {"units": "degrees_east", "standard_name": "longitude"}),
+            "lat": (
+                ["lat"],
+                np.linspace(-90, 90, 5),
+                {"units": "degrees_north", "standard_name": "latitude"},
+            ),
+            "lon": (
+                ["lon"],
+                np.linspace(0, 360, 10),
+                {"units": "degrees_east", "standard_name": "longitude"},
+            ),
         }
     )
 
@@ -89,14 +121,13 @@ def test_regridder_dtype_time_fallback():
 
     # Test DataArray regridding with this non-standard time dim
     da = xr.DataArray(
-        np.random.rand(1, 10, 20),
-        coords=src_ds.coords,
-        dims=("mytime", "lat", "lon")
+        np.random.rand(1, 10, 20), coords=src_ds.coords, dims=("mytime", "lat", "lon")
     )
 
     res = regridder(da)
     assert "mytime" in res.dims
     assert res.shape == (1, 5, 10)
+
 
 def test_non_regriddable_object():
     # Test passing something that shouldn't be regridded
@@ -105,14 +136,30 @@ def test_non_regriddable_object():
 
     src_ds = xr.Dataset(
         coords={
-            "lat": (["lat"], lats, {"units": "degrees_north", "standard_name": "latitude"}),
-            "lon": (["lon"], lons, {"units": "degrees_east", "standard_name": "longitude"}),
+            "lat": (
+                ["lat"],
+                lats,
+                {"units": "degrees_north", "standard_name": "latitude"},
+            ),
+            "lon": (
+                ["lon"],
+                lons,
+                {"units": "degrees_east", "standard_name": "longitude"},
+            ),
         }
     )
     tgt_ds = xr.Dataset(
         coords={
-            "lat": (["lat"], np.linspace(-90, 90, 5), {"units": "degrees_north", "standard_name": "latitude"}),
-            "lon": (["lon"], np.linspace(0, 360, 10), {"units": "degrees_east", "standard_name": "longitude"}),
+            "lat": (
+                ["lat"],
+                np.linspace(-90, 90, 5),
+                {"units": "degrees_north", "standard_name": "latitude"},
+            ),
+            "lon": (
+                ["lon"],
+                np.linspace(0, 360, 10),
+                {"units": "degrees_east", "standard_name": "longitude"},
+            ),
         }
     )
 
@@ -125,6 +172,7 @@ def test_non_regriddable_object():
     res = regridder(time_da)
     xr.testing.assert_identical(res, time_da)
 
+
 def test_regridder_vertical_dimension_detection():
     # Setup source with vertical dimension in lats
     lats = np.linspace(-90, 90, 10)
@@ -134,15 +182,31 @@ def test_regridder_vertical_dimension_detection():
     src_ds = xr.Dataset(
         coords={
             "lev": (["lev"], levs, {"standard_name": "altitude"}),
-            "lat": (["lev", "lat"], np.broadcast_to(lats, (3, 10)), {"units": "degrees_north", "standard_name": "latitude"}),
-            "lon": (["lon"], lons, {"units": "degrees_east", "standard_name": "longitude"}),
+            "lat": (
+                ["lev", "lat"],
+                np.broadcast_to(lats, (3, 10)),
+                {"units": "degrees_north", "standard_name": "latitude"},
+            ),
+            "lon": (
+                ["lon"],
+                lons,
+                {"units": "degrees_east", "standard_name": "longitude"},
+            ),
         }
     )
 
     tgt_ds = xr.Dataset(
         coords={
-            "lat": (["lat"], np.linspace(-90, 90, 5), {"units": "degrees_north", "standard_name": "latitude"}),
-            "lon": (["lon"], np.linspace(0, 360, 10), {"units": "degrees_east", "standard_name": "longitude"}),
+            "lat": (
+                ["lat"],
+                np.linspace(-90, 90, 5),
+                {"units": "degrees_north", "standard_name": "latitude"},
+            ),
+            "lon": (
+                ["lon"],
+                np.linspace(0, 360, 10),
+                {"units": "degrees_east", "standard_name": "longitude"},
+            ),
         }
     )
 
@@ -150,9 +214,7 @@ def test_regridder_vertical_dimension_detection():
     assert "lev" not in regridder._dims_source
 
     da = xr.DataArray(
-        np.random.rand(3, 10, 20),
-        coords=src_ds.coords,
-        dims=("lev", "lat", "lon")
+        np.random.rand(3, 10, 20), coords=src_ds.coords, dims=("lev", "lat", "lon")
     )
 
     res = regridder(da)
