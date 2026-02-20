@@ -303,6 +303,38 @@ def update_history(
     return obj
 
 
+def _transform_coords(
+    x_arr: np.ndarray, y_arr: np.ndarray, crs_in: Any, crs_out: str = "EPSG:4326"
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Transform coordinates using pyproj.
+
+    This function is used with xr.apply_ufunc to support both Eager and Lazy backends.
+
+    Parameters
+    ----------
+    x_arr : np.ndarray
+        X coordinates in input CRS.
+    y_arr : np.ndarray
+        Y coordinates in input CRS.
+    crs_in : Any
+        Input CRS.
+    crs_out : str, default 'EPSG:4326'
+        Output CRS.
+
+    Returns
+    -------
+    lon : np.ndarray
+        Longitude coordinates.
+    lat : np.ndarray
+        Latitude coordinates.
+    """
+    import pyproj
+
+    transformer = pyproj.Transformer.from_crs(crs_in, crs_out, always_xy=True)
+    return transformer.transform(x_arr, y_arr)
+
+
 def create_grid_from_crs(
     crs: Union[str, int, Any],
     extent: Tuple[float, float, float, float],
@@ -342,7 +374,24 @@ def create_grid_from_crs(
     x = np.arange(extent[0] + res_x / 2, extent[1], res_x)
     y = np.arange(extent[2] + res_y / 2, extent[3], res_y)
 
-    xx, yy = np.meshgrid(x, y)
+    x_da = xr.DataArray(x, dims=["x"], name="x")
+    y_da = xr.DataArray(y, dims=["y"], name="y")
+
+    if chunks is not None:
+        # Handle dict or int chunks
+        if isinstance(chunks, dict):
+            x_da = x_da.chunk({"x": chunks.get("x", -1)})
+            y_da = y_da.chunk({"y": chunks.get("y", -1)})
+        else:
+            x_da = x_da.chunk({"x": chunks})
+            y_da = y_da.chunk({"y": chunks})
+
+    # Use xr.broadcast for lazy 2D arrays (Aero Protocol: Driver Efficiency)
+    yy_da, xx_da = xr.broadcast(y_da, x_da)
+
+    # Ensure (y, x) order as per Aero Protocol convention
+    yy_da = yy_da.transpose("y", "x")
+    xx_da = xx_da.transpose("y", "x")
 
     # Transform to lat/lon
     if pyproj is None:
@@ -351,8 +400,18 @@ def create_grid_from_crs(
             "Install it with `pip install pyproj`."
         )
     crs_obj = pyproj.CRS(crs)
-    transformer = pyproj.Transformer.from_crs(crs_obj, "EPSG:4326", always_xy=True)
-    lon, lat = transformer.transform(xx, yy)
+
+    # Use apply_ufunc with dask='parallelized' (Aero Protocol: Vectorization)
+    lon, lat = xr.apply_ufunc(
+        _transform_coords,
+        xx_da,
+        yy_da,
+        kwargs={"crs_in": crs_obj},
+        dask="parallelized",
+        output_dtypes=[float, float],
+        input_core_dims=[[], []],
+        output_core_dims=[[], []],
+    )
 
     # Try to get units from CRS, default to 'm'
     try:
@@ -374,12 +433,12 @@ def create_grid_from_crs(
             ),
             "lat": (
                 ["y", "x"],
-                lat,
+                lat.data,
                 {"units": "degrees_north", "standard_name": "latitude"},
             ),
             "lon": (
                 ["y", "x"],
-                lon,
+                lon.data,
                 {"units": "degrees_east", "standard_name": "longitude"},
             ),
         }
@@ -392,41 +451,46 @@ def create_grid_from_crs(
         # Create CF-compliant curvilinear bounds (Y, X, 4)
         # This ensures bounds are sliced correctly with centers (Aero Protocol: Scientific Hygiene)
 
-        # (4, Y, X)
-        yy_corners, xx_corners = np.meshgrid(y, x, indexing="ij")
-        # We need to broadcast the corners to (4, Y, X)
-        xx_b = np.stack(
-            [
-                np.broadcast_to(x - res_x / 2, (len(y), len(x))),
-                np.broadcast_to(x + res_x / 2, (len(y), len(x))),
-                np.broadcast_to(x + res_x / 2, (len(y), len(x))),
-                np.broadcast_to(x - res_x / 2, (len(y), len(x))),
-            ]
-        )
-        yy_b = np.stack(
-            [
-                np.broadcast_to(y - res_y / 2, (len(x), len(y))).T,
-                np.broadcast_to(y - res_y / 2, (len(x), len(y))).T,
-                np.broadcast_to(y + res_y / 2, (len(x), len(y))).T,
-                np.broadcast_to(y + res_y / 2, (len(x), len(y))).T,
-            ]
+        x_b_raw = np.stack([x - res_x / 2, x + res_x / 2, x + res_x / 2, x - res_x / 2])
+        y_b_raw = np.stack([y - res_y / 2, y - res_y / 2, y + res_y / 2, y + res_y / 2])
+
+        x_b_da = xr.DataArray(x_b_raw, dims=["nv", "x"], name="x_b")
+        y_b_da = xr.DataArray(y_b_raw, dims=["nv", "y"], name="y_b")
+
+        if chunks is not None:
+            if isinstance(chunks, dict):
+                x_b_da = x_b_da.chunk({"x": chunks.get("x", -1)})
+                y_b_da = y_b_da.chunk({"y": chunks.get("y", -1)})
+            else:
+                x_b_da = x_b_da.chunk({"x": chunks})
+                y_b_da = y_b_da.chunk({"y": chunks})
+
+        # Broadcast them to (nv, y, x)
+        yy_b_da, xx_b_da = xr.broadcast(y_b_da, x_b_da)
+
+        # Transform corners lazily
+        lon_b, lat_b = xr.apply_ufunc(
+            _transform_coords,
+            xx_b_da,
+            yy_b_da,
+            kwargs={"crs_in": crs_obj},
+            dask="parallelized",
+            output_dtypes=[float, float],
+            input_core_dims=[[], []],
+            output_core_dims=[[], []],
         )
 
-        lon_b, lat_b = transformer.transform(xx_b, yy_b)
-        # Reshape to (Y, X, 4)
-        lat_b = np.moveaxis(lat_b, 0, -1)
-        lon_b = np.moveaxis(lon_b, 0, -1)
+        # Reshape to (y, x, nv) for CF compliance
+        lat_b = lat_b.transpose("y", "x", "nv")
+        lon_b = lon_b.transpose("y", "x", "nv")
 
-        ds.coords["lat_b"] = (["y", "x", "nv"], lat_b, {"units": "degrees_north"})
-        ds.coords["lon_b"] = (["y", "x", "nv"], lon_b, {"units": "degrees_east"})
+        ds.coords["lat_b"] = (["y", "x", "nv"], lat_b.data, {"units": "degrees_north"})
+        ds.coords["lon_b"] = (["y", "x", "nv"], lon_b.data, {"units": "degrees_east"})
 
         ds["lat"].attrs["bounds"] = "lat_b"
         ds["lon"].attrs["bounds"] = "lon_b"
 
-    update_history(ds, f"Created grid from CRS {crs} using xregrid.")
-
-    if chunks is not None:
-        ds = ds.chunk(chunks)
+    update_history(ds, f"Created grid from CRS {crs} using xregrid (Lazy Generation).")
 
     return ds
 
@@ -463,29 +527,45 @@ def create_mesh_from_coords(
             "Install it with `pip install pyproj`."
         )
     crs_obj = pyproj.CRS(crs)
-    transformer = pyproj.Transformer.from_crs(crs_obj, "EPSG:4326", always_xy=True)
-    lon, lat = transformer.transform(x, y)
+
+    x_da = xr.DataArray(x, dims=["n_pts"], name="x")
+    y_da = xr.DataArray(y, dims=["n_pts"], name="y")
+
+    if chunks is not None:
+        x_da = x_da.chunk(chunks)
+        y_da = y_da.chunk(chunks)
+
+    # Use apply_ufunc with dask='parallelized' (Aero Protocol: Vectorization)
+    lon, lat = xr.apply_ufunc(
+        _transform_coords,
+        x_da,
+        y_da,
+        kwargs={"crs_in": crs_obj},
+        dask="parallelized",
+        output_dtypes=[float, float],
+        input_core_dims=[[], []],
+        output_core_dims=[[], []],
+    )
 
     ds = xr.Dataset(
         coords={
             "lat": (
                 ["n_pts"],
-                lat,
+                lat.data,
                 {"units": "degrees_north", "standard_name": "latitude"},
             ),
             "lon": (
                 ["n_pts"],
-                lon,
+                lon.data,
                 {"units": "degrees_east", "standard_name": "longitude"},
             ),
         }
     )
     ds.attrs["crs"] = crs_obj.to_wkt()
 
-    update_history(ds, f"Created mesh from coordinates and CRS {crs} using xregrid.")
-
-    if chunks is not None:
-        ds = ds.chunk(chunks)
+    update_history(
+        ds, f"Created mesh from coordinates and CRS {crs} using xregrid (Lazy)."
+    )
 
     return ds
 
