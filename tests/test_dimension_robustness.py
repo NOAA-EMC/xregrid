@@ -376,6 +376,60 @@ def test_regridder_raw_ugrid_with_time():
     assert res.shape == (1, 18, 36)
 
 
+def test_regridder_user_specific_structure():
+    # Mimic user's dataset structure: (time, node)
+    # node is string coordinate, lat/lon are (node)
+    n_node = 10
+    n_time = 5
+    times = np.arange(n_time).astype("datetime64[D]")
+    nodes = np.array([f"NODE_{i}" for i in range(n_node)], dtype="<U19")
+
+    src_ds = xr.Dataset(
+        data_vars={
+            "day_of_year": (
+                ["time", "node"],
+                np.random.rand(n_time, n_node).astype("float32"),
+            ),
+            "aod_550nm": (
+                ["time", "node"],
+                np.random.rand(n_time, n_node).astype("float32"),
+            ),
+            "mesh": ([], np.int32(1)),
+        },
+        coords={
+            "time": (["time"], times),
+            "node": (["node"], nodes),
+            "latitude": (["node"], np.linspace(-90, 90, n_node)),
+            "longitude": (["node"], np.linspace(0, 360, n_node)),
+        },
+    )
+
+    from xregrid import create_global_grid
+
+    target_grid = create_global_grid(10, 10)
+
+    # Use bilinear (nearest_s2d for mock compatibility)
+    regridder = Regridder(src_ds, target_grid, method="nearest_s2d")
+
+    assert "time" not in regridder._dims_source
+    assert regridder._dims_source == ("node",)
+
+    # Regrid a variable
+    res = regridder(src_ds["aod_550nm"])
+
+    assert "time" in res.dims
+    assert res.shape == (n_time, 18, 36)
+    assert res.dtype == "float32"
+
+    # Regrid the whole dataset
+    res_ds = regridder(src_ds)
+    assert "time" in res_ds.dims
+    assert "aod_550nm" in res_ds.data_vars
+    assert res_ds["aod_550nm"].shape == (n_time, 18, 36)
+    assert "node" not in res_ds["aod_550nm"].dims  # Space dimension should be replaced
+    assert "mesh" in res_ds.data_vars  # Non-spatial data var should be preserved
+
+
 def test_regridder_raw_ugrid_conservative_with_time():
     n_face = 10
     n_node = 12
