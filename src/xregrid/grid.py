@@ -38,6 +38,10 @@ def _get_mesh_info(
     ValueError
         If coordinates have invalid dimensionality.
     """
+    # Identify and filter out non-spatial dimensions (Time, Z)
+    # (Aero Protocol: Scientific Hygiene)
+    non_spatial_dims = _get_non_spatial_dims(ds)
+
     # Handle uxarray objects
     if hasattr(ds, "uxgrid"):
         uxgrid = getattr(ds, "uxgrid")
@@ -90,6 +94,14 @@ def _get_mesh_info(
                 "'lat_node'/'lon_node', or have CF attributes."
             )
 
+    # Filter out non-spatial dimensions if they are present in lat/lon
+    lat_isel = {d: 0 for d in non_spatial_dims if d in lat.dims}
+    lon_isel = {d: 0 for d in non_spatial_dims if d in lon.dims}
+    if lat_isel:
+        lat = lat.isel(lat_isel, drop=True)
+    if lon_isel:
+        lon = lon.isel(lon_isel, drop=True)
+
     if lat.ndim == 2:
         # Curvilinear
         if lon.ndim == 2 and lon.dims != lat.dims and set(lon.dims) == set(lat.dims):
@@ -118,6 +130,63 @@ def _get_mesh_info(
             )
     else:
         raise ValueError("Latitude and longitude must be 1D or 2D.")
+
+
+def _get_non_spatial_dims(ds: xr.Dataset) -> set[str]:
+    """
+    Identify dimensions that are likely not spatial (Time, Vertical).
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The dataset to inspect.
+
+    Returns
+    -------
+    set of str
+        Names of non-spatial dimensions.
+    """
+    non_spatial_dims = set()
+
+    # 1. Use cf-xarray axes
+    try:
+        # Time axis
+        if "T" in ds.cf.axes:
+            non_spatial_dims.update(ds.cf.axes["T"])
+        # Vertical axis
+        if "Z" in ds.cf.axes:
+            non_spatial_dims.update(ds.cf.axes["Z"])
+    except (KeyError, AttributeError):
+        pass
+
+    # 2. Heuristics based on dimension names
+    time_names = ["time", "t", "tden", "time_counter", "t_step"]
+    vert_names = [
+        "lev",
+        "level",
+        "depth",
+        "pressure",
+        "sigma",
+        "pres",
+        "height",
+        "altitude",
+        "z",
+    ]
+
+    for dim in ds.dims:
+        dim_lower = str(dim).lower()
+        if dim_lower in time_names or dim_lower in vert_names:
+            non_spatial_dims.add(str(dim))
+
+        # 3. Dtype check for time if it's a coordinate
+        if dim in ds.coords:
+            dtype = ds[dim].dtype
+            if np.issubdtype(dtype, np.datetime64) or np.issubdtype(
+                dtype, np.timedelta64
+            ):
+                non_spatial_dims.add(str(dim))
+
+    return non_spatial_dims
 
 
 def _bounds_to_vertices(b: xr.DataArray) -> Union[xr.DataArray, np.ndarray]:

@@ -12,6 +12,7 @@ from scipy.sparse import coo_matrix
 from xregrid.utils import update_history, get_crs_info
 from xregrid.grid import (
     _get_mesh_info,
+    _get_non_spatial_dims,
     _bounds_to_vertices,
     _get_grid_bounds,
     _create_esmf_grid,
@@ -1342,6 +1343,23 @@ class Regridder:
                 res = res.sel({d: self.target_grid_ds[d] for d in self._dims_target})
             return res
         elif isinstance(obj, xr.DataArray):
+            # Check if DataArray is regriddable (Aero Protocol: Robustness)
+            is_regriddable = all(dim in obj.dims for dim in self._dims_source)
+            if not is_regriddable:
+                try:
+                    # Check for logical spatial dimensions
+                    spatial_dims = set(obj.cf["latitude"].dims) | set(
+                        obj.cf["longitude"].dims
+                    )
+                    if spatial_dims.issubset(set(obj.dims)):
+                        is_regriddable = True
+                except (KeyError, AttributeError):
+                    pass
+
+            if not is_regriddable:
+                # Not a spatial DataArray or missing spatial dimensions, return as is
+                return obj
+
             if self._src_was_sorted:
                 obj = obj.sortby([self._dims_source[0], self._dims_source[1]])
             res = self._regrid_dataarray(obj, skipna=skipna, na_thres=na_thres)
@@ -1417,9 +1435,16 @@ class Regridder:
         if da_in.name is not None:
             _processed_ids.add(str(da_in.name))
 
+        # Identify non-spatial variables to exclude from regridding
+        non_spatial_dims = _get_non_spatial_dims(da_in)
+
         for c_name, c_da in da_in.coords.items():
             # Avoid infinite recursion
             if id(c_da) in _processed_ids or c_name in _processed_ids:
+                continue
+
+            # Skip if coordinate itself is a non-spatial coordinate
+            if c_name in non_spatial_dims:
                 continue
 
             if c_name not in da_in.dims and all(
@@ -1688,8 +1713,16 @@ class Regridder:
 
         regridded_items: dict[str, Union[xr.DataArray, Any]] = {}
 
+        # Identify non-spatial variables to exclude from regridding
+        non_spatial_dims = _get_non_spatial_dims(ds_in)
+
         # 1. Regrid data variables
         for name, da in ds_in.data_vars.items():
+            # Skip if variable itself is a non-spatial coordinate/dimension
+            if name in non_spatial_dims:
+                regridded_items[name] = da
+                continue
+
             # CF-Awareness: Check for spatial dimensions using logical axes (Aero Protocol)
             is_regriddable = False
             if all(dim in da.dims for dim in self._dims_source):
@@ -1724,6 +1757,11 @@ class Regridder:
         # and ensure grid_mapping from target grid is attached.
         for c in ds_in.coords:
             if c in out.coords:
+                continue
+
+            # Skip if coordinate itself is a non-spatial coordinate
+            if c in non_spatial_dims:
+                out = out.assign_coords({c: ds_in.coords[c]})
                 continue
 
             # Check if this coordinate depends on spatial dimensions
