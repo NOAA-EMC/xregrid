@@ -35,6 +35,49 @@ ds = create_regional_grid(
 )
 ```
 
+### create_grid_from_crs
+
+::: xregrid.create_grid_from_crs
+
+Create a structured grid dataset from a Coordinate Reference System (CRS) and extent.
+
+```python
+from xregrid import create_grid_from_crs
+
+# Create a Lambert Conformal Conic grid over North America
+extent = (-2500000, 2500000, -2000000, 2000000)
+res = (12000, 12000) # 12km
+crs = "+proj=lcc +lat_1=33 +lat_2=45 +lat_0=40 +lon_0=-97 +x_0=0 +y_0=0 +ellps=WGS84 +units=m +no_defs"
+
+ds = create_grid_from_crs(crs, extent, res)
+```
+
+### create_grid_from_ioapi
+
+::: xregrid.create_grid_from_ioapi
+
+Create a structured grid dataset from IOAPI-compliant metadata.
+
+```python
+from xregrid.utils import create_grid_from_ioapi
+
+metadata = {
+    "GDTYP": 2,
+    "P_ALP": 30.0,
+    "P_BET": 60.0,
+    "XCENT": -97.0,
+    "YCENT": 40.0,
+    "XORIG": -1000.0,
+    "YORIG": -1000.0,
+    "XCELL": 500.0,
+    "YCELL": 500.0,
+    "NCOLS": 100,
+    "NROWS": 100,
+}
+
+ds = create_grid_from_ioapi(metadata)
+```
+
 ## ESMF File Support
 
 ### load_esmf_file
