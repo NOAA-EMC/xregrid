@@ -257,7 +257,7 @@ def _compute_chunk_weights(
         regrid = esmpy.Regrid(src_field, dst_field, **regrid_kwargs)
         weights = regrid.get_weights_dict(deep_copy=True)
 
-        # 5. Dask Resource Hygiene: Destroy temporary ESMF objects (Aero Protocol)
+        # 5. Dask Resource Hygiene: Destroy temporary ESMF objects
         # We don't destroy src_field because it's cached.
         regrid.destroy()
         dst_field.destroy()
@@ -269,7 +269,7 @@ def _compute_chunk_weights(
             # Backward compatibility or direct index passing
             global_indices = dest_slice_info
         else:
-            # Reconstruct global indices locally to save driver memory (Aero Protocol)
+            # Reconstruct global indices locally to save driver memory
             i0_start, i0_end, i1_start, i1_end, total_size1 = dest_slice_info
             if total_size1 == 0:
                 # Unstructured target (1D)

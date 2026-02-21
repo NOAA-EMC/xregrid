@@ -74,11 +74,11 @@ def plot_static(
             "Install it with `pip install matplotlib`."
         )
 
-    # Handle axes and faceting early to avoid multiple 'ax' arguments (Aero Protocol: Robustness)
+    # Handle axes and faceting early to avoid multiple 'ax' arguments
     ax = kwargs.pop("ax", None)
     is_faceted = "col" in kwargs or "row" in kwargs
 
-    # Aero Protocol: No Ambiguous Plots.
+    # No Ambiguous Plots.
     # Identify spatial and faceting dimensions to slice away everything else.
     # We do this early so it applies even if cartopy is missing.
 
@@ -174,12 +174,12 @@ def plot_static(
                 )
 
     if ax is None and not is_faceted:
-        # Strictly enforce projection in axes creation (Aero Protocol)
+        # Strictly enforce projection in axes creation
         if projection is None and ccrs is not None:
             projection = ccrs.PlateCarree()
         ax = plt.axes(projection=projection)
 
-    # Enforce transform for geospatial accuracy (Aero Protocol)
+    # Enforce transform for geospatial accuracy
     if transform is None and ccrs is not None:
         transform = ccrs.PlateCarree()
 
@@ -263,7 +263,7 @@ def plot_interactive(
     da : xr.DataArray
         The DataArray to plot.
     rasterize : bool, default True
-        Whether to rasterize the grid for large datasets (Aero Protocol requirement).
+        Whether to rasterize the grid for large datasets.
     title : str, default 'Interactive Map'
         The plot title.
     **kwargs : Any
@@ -317,7 +317,7 @@ def plot_diagnostics(
     if plt is None:
         raise ImportError("Matplotlib is required for plot_diagnostics.")
 
-    # Aero Protocol: Automated projection discovery (No Ambiguous Plots)
+    # Automated projection discovery (No Ambiguous Plots)
     if projection is None and ccrs is not None:
         # Attempt to discover projection from target grid
         target_crs = get_crs_info(regridder.target_grid_ds)
@@ -386,7 +386,7 @@ def plot_diagnostics_interactive(
     regridder : Regridder
         The Regridder instance to diagnose.
     rasterize : bool, default True
-        Whether to rasterize the grid for large datasets (Aero Protocol requirement).
+        Whether to rasterize the grid for large datasets.
     title : str, optional
         Overall plot title.
     **kwargs : Any
@@ -482,7 +482,7 @@ def plot_comparison(
     if projection is None and ccrs is not None:
         projection = ccrs.PlateCarree()
 
-    # Enforce projection on all subplots for comparison consistency (Aero Protocol)
+    # Enforce projection on all subplots for comparison consistency
     fig, axes = plt.subplots(
         1,
         3,
@@ -573,7 +573,7 @@ def plot_comparison_interactive(
         The regridder used to transform da_src to da_tgt.
         If provided, it will be used to calculate the difference plot correctly.
     rasterize : bool, default True
-        Whether to rasterize the grid for large datasets (Aero Protocol requirement).
+        Whether to rasterize the grid for large datasets.
     cmap : str, default 'viridis'
         Colormap for the data plots.
     diff_cmap : str, default 'RdBu_r'

@@ -62,7 +62,7 @@ class Regridder:
         Whether the grid is periodic in longitude.
     """
 
-    # Internal state default values (Aero Protocol: Robustness)
+    # Internal state default values
     source_grid_ds: Optional[xr.Dataset] = None
     target_grid_ds: Optional[xr.Dataset] = None
     method: str = "bilinear"
@@ -159,7 +159,7 @@ class Regridder:
             import esmpy
 
             if mpi:
-                # Use MULTI logkind for MPI parallelization (Aero Protocol)
+                # Use MULTI logkind for MPI parallelization
                 # Some versions of esmpy don't support logkind in Manager constructor
                 try:
                     self._manager = esmpy.Manager(
@@ -185,7 +185,7 @@ class Regridder:
         self.extrap_method = extrap_method
         self.extrap_dist_exponent = extrap_dist_exponent
 
-        # Determine coordinate system for consistency (Aero Protocol: Robustness)
+        # Determine coordinate system for consistency
         try:
             import esmpy
 
@@ -197,7 +197,6 @@ class Regridder:
 
         # Robust coordinate handling: internally sort coordinates to be ascending
         # to ensure ESMF weight generation is stable and avoid boundary issues.
-        # (Aero Protocol: User doesn't have to worry about monotonicity)
         self.source_grid_ds, self._src_was_sorted = self._normalize_grid(source_grid_ds)
         self.target_grid_ds, self._tgt_was_sorted = self._normalize_grid(target_grid_ds)
 
@@ -315,11 +314,11 @@ class Regridder:
                 lat_dim = lat_da.dims[0]
                 lon_dim = lon_da.dims[0]
 
-                # Only sort if dimension coordinates are numeric (Aero Protocol: Robustness)
+                # Only sort if dimension coordinates are numeric
                 if np.issubdtype(ds[lat_dim].dtype, np.number) and np.issubdtype(
                     ds[lon_dim].dtype, np.number
                 ):
-                    # Aero Protocol: Use indexes for monotonicity check to remain lazy.
+                    # Use indexes for monotonicity check to remain lazy.
                     # Indexes are always in memory in xarray, so this doesn't trigger
                     # computation of dask-backed coordinates.
                     is_lat_asc = ds.indexes[lat_dim].is_monotonic_increasing
@@ -778,7 +777,7 @@ class Regridder:
 
                     chunk_ds = self.target_grid_ds.isel(sel_dict)
 
-                    # Pass slice info instead of massive array to workers (Aero Protocol: Driver Efficiency)
+                    # Pass slice info instead of massive array to workers
                     dest_slice_info = (i0_start, i0_end, i1_start, i1_end, size1)
 
                     future = client.submit(
@@ -839,7 +838,7 @@ class Regridder:
         n_src = int(np.prod(self._shape_source))
         n_dst = int(np.prod(self._shape_target))
 
-        # Perform concatenation on a worker to protect driver memory (Aero Protocol)
+        # Perform concatenation on a worker to protect driver memory
         # We use top-level task functions to avoid capturing 'self' and mocks.
         self._weights_matrix = self._dask_client.submit(
             _assemble_weights_task, self._dask_futures, n_src, n_dst
@@ -1001,7 +1000,7 @@ class Regridder:
             raise RuntimeError("Weights have not been generated yet.")
 
         if hasattr(self._weights_matrix, "key"):
-            # Aero Protocol: Distributed lazy diagnostics
+            # Distributed lazy diagnostics
             import dask.array as da
             import dask.distributed
 
@@ -1041,7 +1040,7 @@ class Regridder:
 
         dims_target = self._dims_target
         if dims_target is None:
-            # Fallback for mock objects without full initialization (Aero Protocol: Robustness)
+            # Fallback for mock objects without full initialization
             if self._shape_target is not None:
                 dims_target = tuple(f"dim_{i}" for i in range(len(self._shape_target)))
             else:
@@ -1055,7 +1054,7 @@ class Regridder:
             coords=coords,
         )
 
-        # Propagate CRS metadata (Aero Protocol: No Ambiguous Plots)
+        # Propagate CRS metadata
         target_crs_obj = get_crs_info(self.target_grid_ds)
         if target_crs_obj:
             ds.attrs["crs"] = target_crs_obj.to_wkt()
@@ -1093,7 +1092,7 @@ class Regridder:
         if self._weights_matrix is None:
             raise RuntimeError("Weights have not been generated yet.")
 
-        # Aero Protocol: Distributed metrics.
+        # Distributed metrics.
         # Compute metrics on the cluster if weights are remote to avoid driver OOM.
         is_remote = hasattr(self._weights_matrix, "key")
 
@@ -1103,7 +1102,7 @@ class Regridder:
         n_weights = -1
         if is_remote:
             if not skip_heavy:
-                # Compute nnz on cluster (Aero Protocol: Optimized Distributed Metrics)
+                # Compute nnz on cluster
                 try:
                     import dask.distributed
 
@@ -1111,7 +1110,7 @@ class Regridder:
                     n_weights_future = client.submit(
                         _get_nnz_task, self._weights_matrix
                     )
-                    # We wait for the scalar result (Aero Protocol: Expected block for reports)
+                    # We wait for the scalar result
                     n_weights = int(n_weights_future.result())
                 except (ImportError, ValueError, AttributeError):
                     n_weights = -1
@@ -1209,7 +1208,7 @@ class Regridder:
         quality_str = "quality=deferred"
         n_dst = int(np.prod(self._shape_target)) if self._shape_target else 0
 
-        # Aero Protocol: Avoid remote calls and expensive reports in __repr__
+        # Avoid remote calls and expensive reports in __repr__
         is_remote = hasattr(self._weights_matrix, "key")
         if is_remote:
             quality_str = "quality=lazy"
@@ -1256,7 +1255,7 @@ class Regridder:
         """
         Visualize spatial diagnostics of the regridding weights.
 
-        Follows the Aero Protocol's Two-Track Rule:
+        Two-Track Rule:
         - mode='static' (Track A): Publication-quality plot using Matplotlib/Cartopy.
         - mode='interactive' (Track B): Exploratory plot using HvPlot/HoloViews.
 
@@ -1319,7 +1318,6 @@ class Regridder:
             na_thres = self.na_thres
 
         # Gather weights if input is eager (NumPy) but weights are lazy (Dask Future)
-        # (Aero Protocol: Flexibility)
         is_lazy_input = False
         if isinstance(obj, xr.DataArray):
             is_lazy_input = hasattr(obj.data, "dask")
@@ -1343,7 +1341,7 @@ class Regridder:
                 res = res.sel({d: self.target_grid_ds[d] for d in self._dims_target})
             return res
         elif isinstance(obj, xr.DataArray):
-            # Check if DataArray is regriddable (Aero Protocol: Robustness)
+            # Check if DataArray is regriddable
             is_regriddable = all(dim in obj.dims for dim in self._dims_source)
             if not is_regriddable:
                 try:
@@ -1426,10 +1424,10 @@ class Regridder:
                     self._weights_matrix.sum(axis=1)
                 ).flatten()
 
-        # Identify auxiliary coordinates that need regridding (Aero Protocol: Scientific Hygiene)
+        # Identify auxiliary coordinates that need regridding
         aux_coords_to_regrid = {}
 
-        # Track this DataArray to prevent mutual recursion (Aero Protocol: Robustness)
+        # Track this DataArray to prevent mutual recursion
         # Using both ID and name for maximum safety
         _processed_ids.add(id(da_in))
         if da_in.name is not None:
@@ -1460,7 +1458,6 @@ class Regridder:
                 )
 
         # CF-Awareness: Map logical dimensions to physical dimension names in da_in
-        # (Aero Protocol: Flexibility)
 
         input_core_dims = list(self._dims_source)
 
@@ -1515,7 +1512,7 @@ class Regridder:
         weights_key_arg = None
 
         # Optimization: Use worker-local cache for weights and total_weights to avoid
-        # serialization overhead when using Dask. (Aero Protocol: Dask Efficiency)
+        # serialization overhead when using Dask.
         if hasattr(da_in.data, "dask"):
             client = self._dask_client
             if client is None:
@@ -1536,7 +1533,7 @@ class Regridder:
                 # Use client ID to ensure cache is valid for current cluster
                 client_id = getattr(client, "id", id(client))
 
-                # Ensure weights are in worker-local cache (Aero Protocol: Efficiency)
+                # Ensure weights are in worker-local cache
                 if (client_id, weights_key_arg) not in _DRIVER_CACHE:
                     if hasattr(self._weights_matrix, "key"):
                         # Truly Distributed: matrix is already a Future on the cluster.
@@ -1612,7 +1609,6 @@ class Regridder:
         out.encoding.update(da_in.encoding)
 
         # Assign coordinates from target grid (including scalar coords like grid_mapping)
-        # (Aero Protocol: Scientific Hygiene)
         target_coords_to_assign = {}
         target_gm_name = None
         target_mesh_name = None
@@ -1644,7 +1640,7 @@ class Regridder:
 
         out = out.assign_coords(target_coords_to_assign)
 
-        # Update grid_mapping and mesh attributes (Aero Protocol: Scientific Hygiene)
+        # Update grid_mapping and mesh attributes
         if target_gm_name:
             out.attrs["grid_mapping"] = target_gm_name
             if "grid_mapping" in out.encoding:
@@ -1671,7 +1667,7 @@ class Regridder:
             if "location" in out.attrs:
                 del out.attrs["location"]
 
-        # Propagate CRS metadata (Aero Protocol: Scientific Hygiene)
+        # Propagate CRS metadata
         target_crs_obj = get_crs_info(self.target_grid_ds)
         if target_crs_obj:
             out.attrs["crs"] = target_crs_obj.to_wkt()
@@ -1749,7 +1745,7 @@ class Regridder:
                 regridded_items[name] = da
                 continue
 
-            # CF-Awareness: Check for spatial dimensions using logical axes (Aero Protocol)
+            # CF-Awareness: Check for spatial dimensions using logical axes
             is_regriddable = False
             if all(dim in da.dims for dim in self._dims_source):
                 is_regriddable = True
@@ -1779,7 +1775,7 @@ class Regridder:
 
         out = xr.Dataset(regridded_items, attrs=ds_in.attrs)
 
-        # 2. Scientific Hygiene: Regrid auxiliary spatial coordinates and preserve others (Aero Protocol)
+        # 2. Scientific Hygiene: Regrid auxiliary spatial coordinates and preserve others
         # and ensure grid_mapping from target grid is attached.
         for c in ds_in.coords:
             if c in out.coords:
@@ -1809,7 +1805,7 @@ class Regridder:
                 # Not dependent on spatial dims, just preserve it
                 out = out.assign_coords({c: ds_in.coords[c]})
 
-        # 3. Handle grid_mapping and scalar coordinates from target grid (Aero Protocol)
+        # 3. Handle grid_mapping and scalar coordinates from target grid
         target_gm_name = None
         target_mesh_name = None
         for c in self.target_grid_ds.coords:
@@ -1852,7 +1848,7 @@ class Regridder:
             if "grid_mapping" in out.attrs:
                 del out.attrs["grid_mapping"]
 
-        # Propagate CRS metadata (Aero Protocol: Scientific Hygiene)
+        # Propagate CRS metadata
         target_crs_obj = get_crs_info(self.target_grid_ds)
         if target_crs_obj:
             out.attrs["crs"] = target_crs_obj.to_wkt()

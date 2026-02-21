@@ -61,7 +61,6 @@ def create_global_grid(
     if add_bounds:
         # Use CF-compliant (N, 2) bounds that share dimensions with the grid.
         # This ensures they are correctly subsetted and sorted by xarray.
-        # (Aero Protocol: Dask Efficiency & Robustness)
         lat_b_1d = np.arange(-90, 90 + res_lat, res_lat)
         lon_b_1d = np.arange(0, 360 + res_lon, res_lon)
 
@@ -386,10 +385,10 @@ def create_grid_from_crs(
             x_da = x_da.chunk({"x": chunks})
             y_da = y_da.chunk({"y": chunks})
 
-    # Use xr.broadcast for lazy 2D arrays (Aero Protocol: Driver Efficiency)
+    # Use xr.broadcast for lazy 2D arrays
     yy_da, xx_da = xr.broadcast(y_da, x_da)
 
-    # Ensure (y, x) order as per Aero Protocol convention
+    # Ensure (y, x) order
     yy_da = yy_da.transpose("y", "x")
     xx_da = xx_da.transpose("y", "x")
 
@@ -401,7 +400,7 @@ def create_grid_from_crs(
         )
     crs_obj = pyproj.CRS(crs)
 
-    # Use apply_ufunc with dask='parallelized' (Aero Protocol: Vectorization)
+    # Use apply_ufunc with dask='parallelized'
     lon, lat = xr.apply_ufunc(
         _transform_coords,
         xx_da,
@@ -449,7 +448,7 @@ def create_grid_from_crs(
 
     if add_bounds:
         # Create CF-compliant curvilinear bounds (Y, X, 4)
-        # This ensures bounds are sliced correctly with centers (Aero Protocol: Scientific Hygiene)
+        # This ensures bounds are sliced correctly with centers
 
         x_b_raw = np.stack([x - res_x / 2, x + res_x / 2, x + res_x / 2, x - res_x / 2])
         y_b_raw = np.stack([y - res_y / 2, y - res_y / 2, y + res_y / 2, y + res_y / 2])
@@ -617,7 +616,7 @@ def create_mesh_from_coords(
         x_da = x_da.chunk(chunks)
         y_da = y_da.chunk(chunks)
 
-    # Use apply_ufunc with dask='parallelized' (Aero Protocol: Vectorization)
+    # Use apply_ufunc with dask='parallelized'
     lon, lat = xr.apply_ufunc(
         _transform_coords,
         x_da,

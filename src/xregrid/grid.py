@@ -96,7 +96,7 @@ def _get_mesh_info(
         If coordinates have invalid dimensionality.
     """
     # Identify and filter out non-spatial dimensions (Time, Z)
-    # (Aero Protocol: Scientific Hygiene)
+    #
     non_spatial_dims = _get_non_spatial_dims(ds)
 
     # Handle uxarray objects
@@ -239,7 +239,7 @@ def _bounds_to_vertices(b: xr.DataArray) -> Union[xr.DataArray, np.ndarray]:
     Convert cell boundary coordinates (bounds) to vertex coordinates for ESMF.
 
     Supports both 1D and 2D bounds, and 3D curvilinear bounds.
-    Backend-agnostic (Aero Protocol): stays lazy if input is a Dask array.
+    Backend-agnostic : stays lazy if input is a Dask array.
 
     Parameters
     ----------
@@ -310,7 +310,7 @@ def _get_grid_bounds(
         lat_b_da = ds.cf.get_bounds("latitude")
         lon_b_da = ds.cf.get_bounds("longitude")
 
-        # Filter out non-spatial dimensions (Aero Protocol: Robustness)
+        # Filter out non-spatial dimensions
         for da in [lat_b_da, lon_b_da]:
             isel_dict = {d: 0 for d in non_spatial_dims if d in da.dims}
             if isel_dict:
@@ -445,7 +445,7 @@ def _get_unstructured_mesh_info(
             element_ids = []
             orig_cell_index = []
 
-            # Vectorized triangulation (Aero Protocol: Performance)
+            # Vectorized triangulation
             n_cells, max_edges = conn_raw.shape
             n_edges = np.sum(conn_raw != fill_value, axis=1)
             max_tris = max_edges - 2
@@ -482,7 +482,7 @@ def _get_unstructured_mesh_info(
         v_lon = ds["lonVertex"]
         v_conn = ds["verticesOnCell"]
 
-        # Filter out non-spatial dimensions (Aero Protocol: Robustness)
+        # Filter out non-spatial dimensions
         for da in [v_lat, v_lon, v_conn]:
             isel_dict = {d: 0 for d in non_spatial_dims if d in da.dims}
             if isel_dict:
@@ -507,7 +507,7 @@ def _get_unstructured_mesh_info(
         element_ids = []
         orig_cell_index = []
 
-        # Vectorized triangulation for MPAS (Aero Protocol: Performance)
+        # Vectorized triangulation for MPAS
         # MPAS is 1-based indexing for vertex IDs
         n_cells, max_edges = conn_raw.shape
         max_tris = max_edges - 2
@@ -615,7 +615,7 @@ def _get_unstructured_mesh_info(
             element_ids = []
             orig_cell_index = []
 
-            # Vectorized triangulation for UGRID (Aero Protocol: Performance)
+            # Vectorized triangulation for UGRID
             n_cells, max_edges = conn_raw.shape
             n_edges = np.sum(conn_raw != fill_value, axis=1)
             max_tris = max_edges - 2
@@ -810,7 +810,7 @@ def _create_esmf_grid(
             staggerlocs.append(esmpy.StaggerLoc.CORNER)
 
         if coord_sys is None:
-            # Use CART for regional grids to avoid boundary chord issues (Aero Protocol: Robustness)
+            # Use CART for regional grids to avoid boundary chord issues
             # SPH_DEG is used only for periodic/global grids or unstructured meshes.
             coord_sys = esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART
 
