@@ -135,10 +135,38 @@ def _get_mesh_info(
         except (AttributeError, KeyError):
             pass
 
-    try:
-        lat = ds.cf["latitude"]
-        lon = ds.cf["longitude"]
-    except (KeyError, AttributeError):
+    def _find_coord(ds, key):
+        try:
+            return ds.cf[key]
+        except (KeyError, AttributeError):
+            try:
+                # Use cf.coordinates to handle ambiguity
+                matches = ds.cf.coordinates.get(key, [])
+                if not matches:
+                    # Also check axes
+                    matches = ds.cf.axes.get(key, [])
+
+                if matches:
+                    # Prefer one that matches a data variable's dimensions
+                    if hasattr(ds, "data_vars") and len(ds.data_vars) > 0:
+                        # Find first non-topology data variable
+                        for name, da in ds.data_vars.items():
+                            if da.attrs.get("cf_role") not in [
+                                "mesh_topology",
+                                "face_node_connectivity",
+                            ]:
+                                for m in matches:
+                                    if set(ds[m].dims).issubset(set(da.dims)):
+                                        return ds[m]
+                    return ds[matches[0]]
+            except Exception:
+                pass
+        return None
+
+    lat = _find_coord(ds, "latitude")
+    lon = _find_coord(ds, "longitude")
+
+    if lat is None or lon is None:
         if "lat" in ds and "lon" in ds:
             lat = ds["lat"]
             lon = ds["lon"]
@@ -169,14 +197,21 @@ def _get_mesh_info(
     if lon_isel:
         lon = lon.isel(lon_isel, drop=True)
 
+    # UGRID: Check for 'mesh' and 'location' attributes to confirm unstructured
+    is_ugrid = False
+    if "mesh" in lat.attrs and "location" in lat.attrs:
+        is_ugrid = True
+    elif "mesh" in lon.attrs and "location" in lon.attrs:
+        is_ugrid = True
+
     if lat.ndim == 2:
         # Curvilinear
         if lon.ndim == 2 and lon.dims != lat.dims and set(lon.dims) == set(lat.dims):
             lon = lon.transpose(*lat.dims)
         return lon, lat, lat.shape, lat.dims, False
     elif lat.ndim == 1:
-        if lat.dims == lon.dims:
-            # Unstructured (e.g. MPAS)
+        if lat.dims == lon.dims or is_ugrid:
+            # Unstructured (e.g. MPAS or UGRID)
             return lon, lat, lat.shape, lat.dims, True
         else:
             # Rectilinear
@@ -500,24 +535,33 @@ def _get_unstructured_mesh_info(
             orig_cell_index.astype(np.int32),
         )
 
-    # 2. Detect UGRID
-    # Look for face_node_connectivity
-    conn_var = None
-    for var in ds.data_vars:
-        if ds[var].attrs.get("cf_role") == "face_node_connectivity":
-            conn_var = var
+    # 2. Detect UGRID (Standard Compliance)
+    mesh_var = None
+    for var in ds.variables:
+        if ds[var].attrs.get("cf_role") == "mesh_topology":
+            mesh_var = var
             break
 
+    conn_var = None
+    if mesh_var:
+        conn_var = ds[mesh_var].attrs.get("face_node_connectivity")
+
     if not conn_var:
-        # Fallback to standard names
-        if "face_node_connectivity" in ds:
-            conn_var = "face_node_connectivity"
+        # Fallback: Look for face_node_connectivity role directly
+        for var in ds.variables:
+            if ds[var].attrs.get("cf_role") == "face_node_connectivity":
+                conn_var = var
+                break
+
+    if not conn_var and "face_node_connectivity" in ds:
+        conn_var = "face_node_connectivity"
 
     if conn_var:
-        mesh_name = ds[conn_var].attrs.get("mesh", "")
-        # Try to find node coordinates
+        mesh_name = mesh_var or ds[conn_var].attrs.get("mesh", "")
+
         node_lon_var = None
         node_lat_var = None
+
         if mesh_name and mesh_name in ds:
             node_coords_attr = ds[mesh_name].attrs.get("node_coordinates", "").split()
             if len(node_coords_attr) >= 2:
@@ -525,7 +569,22 @@ def _get_unstructured_mesh_info(
                 node_lat_var = node_coords_attr[1]
 
         if not node_lon_var:
-            # Fallback
+            # Enhanced discovery using attributes and common names
+            for v in ds.variables:
+                if v == conn_var:
+                    continue
+                attrs = ds[v].attrs
+                if attrs.get("standard_name") == "longitude" and (
+                    "node" in v.lower() or attrs.get("location") == "node"
+                ):
+                    node_lon_var = v
+                if attrs.get("standard_name") == "latitude" and (
+                    "node" in v.lower() or attrs.get("location") == "node"
+                ):
+                    node_lat_var = v
+
+        if not node_lon_var:
+            # Last fallback
             node_lon_var = "node_lon" if "node_lon" in ds else "lon_node"
             node_lat_var = "node_lat" if "node_lat" in ds else "lat_node"
 

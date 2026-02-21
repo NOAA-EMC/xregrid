@@ -1615,6 +1615,7 @@ class Regridder:
         # (Aero Protocol: Scientific Hygiene)
         target_coords_to_assign = {}
         target_gm_name = None
+        target_mesh_name = None
 
         for c in self.target_grid_ds.coords:
             # Include coordinates that match target dimensions OR are scalar
@@ -1623,17 +1624,27 @@ class Regridder:
                 # Identify if this is a grid_mapping coordinate
                 if "grid_mapping_name" in self.target_grid_ds.coords[c].attrs:
                     target_gm_name = c
+                # Identify UGRID mesh topology in coords
+                if (
+                    self.target_grid_ds.coords[c].attrs.get("cf_role")
+                    == "mesh_topology"
+                ):
+                    target_mesh_name = c
 
-        # Also check data_vars in target_grid_ds for grid_mapping variables
-        if target_gm_name is None:
-            for v in self.target_grid_ds.data_vars:
-                if "grid_mapping_name" in self.target_grid_ds[v].attrs:
+        # Also check data_vars in target_grid_ds for grid_mapping or mesh topology
+        for v in self.target_grid_ds.data_vars:
+            if "grid_mapping_name" in self.target_grid_ds[v].attrs:
+                if target_gm_name is None:
                     target_gm_name = v
+                    target_coords_to_assign[v] = self.target_grid_ds[v]
+            if self.target_grid_ds[v].attrs.get("cf_role") == "mesh_topology":
+                if target_mesh_name is None:
+                    target_mesh_name = v
                     target_coords_to_assign[v] = self.target_grid_ds[v]
 
         out = out.assign_coords(target_coords_to_assign)
 
-        # Update grid_mapping attribute (Aero Protocol: Scientific Hygiene)
+        # Update grid_mapping and mesh attributes (Aero Protocol: Scientific Hygiene)
         if target_gm_name:
             out.attrs["grid_mapping"] = target_gm_name
             if "grid_mapping" in out.encoding:
@@ -1644,6 +1655,21 @@ class Regridder:
                 del out.attrs["grid_mapping"]
             if "grid_mapping" in out.encoding:
                 del out.encoding["grid_mapping"]
+
+        if target_mesh_name:
+            out.attrs["mesh"] = target_mesh_name
+            # Determine location based on target dims
+            # This is a simplification; we assume it's face/element if conservative, node otherwise.
+            if self.method == "conservative":
+                out.attrs["location"] = "face"
+            else:
+                out.attrs["location"] = "node"
+        else:
+            # Remove source UGRID attributes if target is not UGRID
+            if "mesh" in out.attrs:
+                del out.attrs["mesh"]
+            if "location" in out.attrs:
+                del out.attrs["location"]
 
         # Propagate CRS metadata (Aero Protocol: Scientific Hygiene)
         target_crs_obj = get_crs_info(self.target_grid_ds)
@@ -1785,6 +1811,7 @@ class Regridder:
 
         # 3. Handle grid_mapping and scalar coordinates from target grid (Aero Protocol)
         target_gm_name = None
+        target_mesh_name = None
         for c in self.target_grid_ds.coords:
             if c not in out.coords:
                 if set(self.target_grid_ds.coords[c].dims).issubset(
@@ -1795,15 +1822,25 @@ class Regridder:
             # Identify target grid mapping variable
             if "grid_mapping_name" in self.target_grid_ds.coords[c].attrs:
                 target_gm_name = c
+            # Identify UGRID mesh topology
+            if self.target_grid_ds.coords[c].attrs.get("cf_role") == "mesh_topology":
+                target_mesh_name = c
 
-        # Also check target data_vars for grid_mapping
-        if target_gm_name is None:
-            for v in self.target_grid_ds.data_vars:
-                if "grid_mapping_name" in self.target_grid_ds[v].attrs:
+        # Also check target data_vars for grid_mapping and mesh topology
+        for v in self.target_grid_ds.data_vars:
+            if "grid_mapping_name" in self.target_grid_ds[v].attrs:
+                if target_gm_name is None:
                     target_gm_name = v
                     if target_gm_name not in out.coords:
                         out = out.assign_coords(
                             {target_gm_name: self.target_grid_ds[v]}
+                        )
+            if self.target_grid_ds[v].attrs.get("cf_role") == "mesh_topology":
+                if target_mesh_name is None:
+                    target_mesh_name = v
+                    if target_mesh_name not in out.coords:
+                        out = out.assign_coords(
+                            {target_mesh_name: self.target_grid_ds[v]}
                         )
 
         # Update global grid_mapping attribute if it exists

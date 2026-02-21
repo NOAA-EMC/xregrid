@@ -495,6 +495,88 @@ def create_grid_from_crs(
     return ds
 
 
+def create_grid_from_ioapi(
+    metadata: Dict[str, Any],
+    add_bounds: bool = True,
+    chunks: Optional[Union[int, Dict[str, int]]] = None,
+) -> xr.Dataset:
+    """
+    Create a structured grid dataset from IOAPI-compliant metadata.
+
+    Supports GDTYP:
+    - 1: Lat-Lon
+    - 2: Lambert Conformal
+    - 5: Polar Stereographic
+    - 6: Albers Equal Area
+    - 7: Mercator
+
+    Parameters
+    ----------
+    metadata : dict
+        IOAPI metadata containing GDTYP, P_ALP, P_BET, P_GAM, XCENT, YCENT,
+        XORIG, YORIG, XCELL, YCELL, NCOLS, NROWS.
+    add_bounds : bool, default True
+        Whether to add cell boundary coordinates.
+    chunks : int or dict, optional
+        Chunk sizes for the resulting dask-backed dataset.
+
+    Returns
+    -------
+    xr.Dataset
+        The grid dataset.
+    """
+    gdtyp = metadata["GDTYP"]
+    p_alp = metadata["P_ALP"]
+    p_bet = metadata["P_BET"]
+    xcent = metadata["XCENT"]
+    ycent = metadata["YCENT"]
+    xorig = metadata["XORIG"]
+    yorig = metadata["YORIG"]
+    xcell = metadata["XCELL"]
+    ycell = metadata["YCELL"]
+    ncols = metadata["NCOLS"]
+    nrows = metadata["NROWS"]
+
+    if gdtyp == 1:  # Lat-Lon
+        crs = "EPSG:4326"
+        # In IOAPI Lat-Lon, XORIG/YORIG are degrees, XCELL/YCELL are degrees
+    elif gdtyp == 2:  # Lambert Conformal
+        crs = (
+            f"+proj=lcc +lat_1={p_alp} +lat_2={p_bet} +lat_0={ycent} "
+            f"+lon_0={xcent} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+        )
+    elif gdtyp == 5:  # Polar Stereographic
+        crs = (
+            f"+proj=stere +lat_0={ycent} +lat_ts={p_alp} +lon_0={xcent} "
+            f"+k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+        )
+    elif gdtyp == 6:  # Albers Equal Area
+        crs = (
+            f"+proj=aea +lat_1={p_alp} +lat_2={p_bet} +lat_0={ycent} "
+            f"+lon_0={xcent} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+        )
+    elif gdtyp == 7:  # Mercator
+        crs = (
+            f"+proj=merc +lat_ts={p_alp} +lon_0={xcent} "
+            f"+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+        )
+    else:
+        raise ValueError(f"Unsupported IOAPI GDTYP: {gdtyp}")
+
+    extent = (xorig, xorig + ncols * xcell, yorig, yorig + nrows * ycell)
+    res = (xcell, ycell)
+
+    ds = create_grid_from_crs(crs, extent, res, add_bounds=add_bounds, chunks=chunks)
+
+    # Attach IOAPI metadata for provenance
+    for k, v in metadata.items():
+        ds.attrs[f"ioapi_{k}"] = v
+
+    update_history(ds, f"Created grid from IOAPI metadata (GDTYP={gdtyp})")
+
+    return ds
+
+
 def create_mesh_from_coords(
     x: np.ndarray,
     y: np.ndarray,
