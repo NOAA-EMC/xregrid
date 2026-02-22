@@ -1,3 +1,12 @@
+"""
+Create Sample Data for xregrid CLI
+=================================
+
+This script generates a sample global NetCDF file that can be used to test
+the xregrid CLI. It creates a 2-degree global grid with a synthetic
+sine-cosine wave pattern.
+"""
+
 import xarray as xr
 import numpy as np
 from xregrid.utils import create_global_grid
