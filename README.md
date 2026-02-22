@@ -18,6 +18,7 @@ XRegrid is a high-performance regridding library that builds on top of ESMF (Ear
 - **Automatic coordinate detection**: Support for `cf-xarray` for easy coordinate and boundary identification.
 - **Weight Reuse**: Save and load regridding weights to/from NetCDF files.
 - **Grid Utilities**: Built-in functions for quick global and regional grid generation.
+- **Command Line Interface**: Simple CLI for regridding NetCDF files without writing Python code.
 
 ## Why XRegrid?
 
@@ -76,6 +77,20 @@ client = Client(cluster)
 ```
 
 See [slurm/dask_jobqueue_examples.py](slurm/dask_jobqueue_examples.py) for more examples.
+
+## Command Line Interface (CLI)
+
+XRegrid includes a CLI for quick regridding operations:
+
+```bash
+# Regrid to a 1.0 degree global grid
+xregrid input.nc 1.0 -o output.nc
+
+# Regrid using a specific method and Dask for parallelization
+xregrid input.nc target_grid.nc --method conservative --dask-local 4 -o output.nc
+```
+
+See the [CLI documentation](https://xregrid.readthedocs.io/user-guide/cli/) for more details.
 
 ## Installation
 
