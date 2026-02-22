@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from typing import Optional
 
 import xarray as xr
 from xregrid import Regridder, create_global_grid, create_regional_grid
@@ -65,9 +64,7 @@ def parse_args():
         metavar="MACHINE",
         help="Use dask-jobqueue SLURMCluster for MACHINE (e.g., hera, jet).",
     )
-    dask_group.add_argument(
-        "--dask-account", help="SLURM account for dask-jobqueue."
-    )
+    dask_group.add_argument("--dask-account", help="SLURM account for dask-jobqueue.")
 
     return parser.parse_args()
 
@@ -89,7 +86,9 @@ def main():
         client = Client(args.dask_scheduler)
         print(f"Connected to Dask scheduler: {args.dask_scheduler}")
     elif args.dask_jobqueue:
-        cluster = get_rdhpcs_cluster(machine=args.dask_jobqueue, account=args.dask_account)
+        cluster = get_rdhpcs_cluster(
+            machine=args.dask_jobqueue, account=args.dask_account
+        )
         from dask.distributed import Client
 
         client = Client(cluster)
@@ -121,11 +120,15 @@ def main():
                     print(f"Creating global target grid: res={res}")
                     ds_tgt = create_global_grid(res, res)
             except ValueError:
-                print(f"Error: target '{args.target}' is neither a file nor a valid resolution.")
+                print(
+                    f"Error: target '{args.target}' is neither a file nor a valid resolution."
+                )
                 sys.exit(1)
 
         # 4. Initialize Regridder
-        print(f"Initializing Regridder (method={args.method}, periodic={args.periodic})")
+        print(
+            f"Initializing Regridder (method={args.method}, periodic={args.periodic})"
+        )
         regridder = Regridder(
             ds_src,
             ds_tgt,
@@ -138,7 +141,7 @@ def main():
         )
 
         # 5. Perform Regridding
-        print(f"Regridding dataset...")
+        print("Regridding dataset...")
         ds_out = regridder(ds_src)
 
         # 6. Save Output

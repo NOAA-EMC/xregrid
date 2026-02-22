@@ -1,10 +1,10 @@
-import os
 import subprocess
 import sys
 import pytest
 import xarray as xr
 import numpy as np
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
 
 @pytest.fixture
 def sample_input(tmp_path):
@@ -22,14 +22,14 @@ def sample_input(tmp_path):
     ds.to_netcdf(path)
     return path
 
+
 def test_cli_help():
     result = subprocess.run(
-        [sys.executable, "-m", "xregrid.cli", "--help"],
-        capture_output=True,
-        text=True
+        [sys.executable, "-m", "xregrid.cli", "--help"], capture_output=True, text=True
     )
     assert result.returncode == 0
     assert "xregrid CLI" in result.stdout
+
 
 def test_cli_basic(sample_input, tmp_path, monkeypatch):
     output = tmp_path / "output.nc"
@@ -37,26 +37,32 @@ def test_cli_basic(sample_input, tmp_path, monkeypatch):
     with patch("xregrid.cli.Regridder") as mock_regridder:
         # Mock the regridder instance and its __call__ method
         instance = mock_regridder.return_value
-        instance.return_value = xr.open_dataset(sample_input) # Return input as mock output
+        instance.return_value = xr.open_dataset(
+            sample_input
+        )  # Return input as mock output
 
         # Mock sys.argv
         test_args = [
             "xregrid.cli",
             str(sample_input),
             "1.0",
-            "--output", str(output),
-            "--method", "bilinear"
+            "--output",
+            str(output),
+            "--method",
+            "bilinear",
         ]
         monkeypatch.setattr(sys, "argv", test_args)
 
         from xregrid.cli import main
+
         main()
 
         assert output.exists()
         mock_regridder.assert_called_once()
         args, kwargs = mock_regridder.call_args
         assert kwargs["method"] == "bilinear"
-        assert args[1].lat.size == 180 # 1.0 degree global grid has 180 lat points
+        assert args[1].lat.size == 180  # 1.0 degree global grid has 180 lat points
+
 
 def test_cli_regional(sample_input, tmp_path, monkeypatch):
     output = tmp_path / "output.nc"
@@ -68,12 +74,14 @@ def test_cli_regional(sample_input, tmp_path, monkeypatch):
             "xregrid.cli",
             str(sample_input),
             "0.5",
-            "--output", str(output),
-            "--extent=-10,10,20,40"
+            "--output",
+            str(output),
+            "--extent=-10,10,20,40",
         ]
         monkeypatch.setattr(sys, "argv", test_args)
 
         from xregrid.cli import main
+
         main()
 
         assert output.exists()
