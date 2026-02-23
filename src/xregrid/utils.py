@@ -11,6 +11,12 @@ try:
     import pyproj
 except ImportError:
     pyproj = None
+
+try:
+    import dask.array as da
+except ImportError:
+    da = None
+
 import xarray as xr
 
 
@@ -49,8 +55,20 @@ def _create_rectilinear_grid(
     xr.Dataset
         The generated grid dataset.
     """
-    lat = np.arange(lat_range[0] + res_lat / 2, lat_range[1], res_lat)
-    lon = np.arange(lon_range[0] + res_lon / 2, lon_range[1], res_lon)
+    if chunks is not None and da is not None:
+        # Convert chunks to integer if it's a dict for 1D arrays
+        lat_chunks = chunks.get("lat", -1) if isinstance(chunks, dict) else chunks
+        lon_chunks = chunks.get("lon", -1) if isinstance(chunks, dict) else chunks
+
+        lat = da.arange(
+            lat_range[0] + res_lat / 2, lat_range[1], res_lat, chunks=lat_chunks
+        )
+        lon = da.arange(
+            lon_range[0] + res_lon / 2, lon_range[1], res_lon, chunks=lon_chunks
+        )
+    else:
+        lat = np.arange(lat_range[0] + res_lat / 2, lat_range[1], res_lat)
+        lon = np.arange(lon_range[0] + res_lon / 2, lon_range[1], res_lon)
 
     ds = xr.Dataset(
         coords={
@@ -69,17 +87,33 @@ def _create_rectilinear_grid(
 
     if add_bounds:
         # Use CF-compliant (N, 2) bounds.
-        lat_b_1d = np.arange(lat_range[0], lat_range[1] + res_lat, res_lat)
-        lon_b_1d = np.arange(lon_range[0], lon_range[1] + res_lon, res_lon)
+        if chunks is not None and da is not None:
+            lat_b_1d = da.arange(
+                lat_range[0], lat_range[1] + res_lat, res_lat, chunks=lat_chunks
+            )
+            lon_b_1d = da.arange(
+                lon_range[0], lon_range[1] + res_lon, res_lon, chunks=lon_chunks
+            )
 
-        # Handle potential floating point overshoot from np.arange
-        if len(lat_b_1d) > len(lat) + 1:
-            lat_b_1d = lat_b_1d[: len(lat) + 1]
-        if len(lon_b_1d) > len(lon) + 1:
-            lon_b_1d = lon_b_1d[: len(lon) + 1]
+            # Handle potential floating point overshoot from da.arange
+            # In dask, we use slicing which is lazy
+            lat_b_1d = lat_b_1d[: lat.size + 1]
+            lon_b_1d = lon_b_1d[: lon.size + 1]
 
-        lat_b_2d = np.stack([lat_b_1d[:-1], lat_b_1d[1:]], axis=1)
-        lon_b_2d = np.stack([lon_b_1d[:-1], lon_b_1d[1:]], axis=1)
+            lat_b_2d = da.stack([lat_b_1d[:-1], lat_b_1d[1:]], axis=1)
+            lon_b_2d = da.stack([lon_b_1d[:-1], lon_b_1d[1:]], axis=1)
+        else:
+            lat_b_1d = np.arange(lat_range[0], lat_range[1] + res_lat, res_lat)
+            lon_b_1d = np.arange(lon_range[0], lon_range[1] + res_lon, res_lon)
+
+            # Handle potential floating point overshoot from np.arange
+            if len(lat_b_1d) > len(lat) + 1:
+                lat_b_1d = lat_b_1d[: len(lat) + 1]
+            if len(lon_b_1d) > len(lon) + 1:
+                lon_b_1d = lon_b_1d[: len(lon) + 1]
+
+            lat_b_2d = np.stack([lat_b_1d[:-1], lat_b_1d[1:]], axis=1)
+            lon_b_2d = np.stack([lon_b_1d[:-1], lon_b_1d[1:]], axis=1)
 
         ds.coords["lat_b"] = (
             ["lat", "nv"],
@@ -403,20 +437,19 @@ def create_grid_from_crs(
         res_x, res_y = map(float, res)
 
     # Generate 1D coordinates in projected space
-    x = np.arange(extent[0] + res_x / 2, extent[1], res_x)
-    y = np.arange(extent[2] + res_y / 2, extent[3], res_y)
+    if chunks is not None and da is not None:
+        # Handle dict or int chunks for 1D arrays
+        x_chunks = chunks.get("x", -1) if isinstance(chunks, dict) else chunks
+        y_chunks = chunks.get("y", -1) if isinstance(chunks, dict) else chunks
+
+        x = da.arange(extent[0] + res_x / 2, extent[1], res_x, chunks=x_chunks)
+        y = da.arange(extent[2] + res_y / 2, extent[3], res_y, chunks=y_chunks)
+    else:
+        x = np.arange(extent[0] + res_x / 2, extent[1], res_x)
+        y = np.arange(extent[2] + res_y / 2, extent[3], res_y)
 
     x_da = xr.DataArray(x, dims=["x"], name="x")
     y_da = xr.DataArray(y, dims=["y"], name="y")
-
-    if chunks is not None:
-        # Handle dict or int chunks
-        if isinstance(chunks, dict):
-            x_da = x_da.chunk({"x": chunks.get("x", -1)})
-            y_da = y_da.chunk({"y": chunks.get("y", -1)})
-        else:
-            x_da = x_da.chunk({"x": chunks})
-            y_da = y_da.chunk({"y": chunks})
 
     # Use xr.broadcast for lazy 2D arrays
     yy_da, xx_da = xr.broadcast(y_da, x_da)
@@ -483,19 +516,23 @@ def create_grid_from_crs(
         # Create CF-compliant curvilinear bounds (Y, X, 4)
         # This ensures bounds are sliced correctly with centers
 
-        x_b_raw = np.stack([x - res_x / 2, x + res_x / 2, x + res_x / 2, x - res_x / 2])
-        y_b_raw = np.stack([y - res_y / 2, y - res_y / 2, y + res_y / 2, y + res_y / 2])
+        if chunks is not None and da is not None:
+            x_b_raw = da.stack(
+                [x - res_x / 2, x + res_x / 2, x + res_x / 2, x - res_x / 2]
+            )
+            y_b_raw = da.stack(
+                [y - res_y / 2, y - res_y / 2, y + res_y / 2, y + res_y / 2]
+            )
+        else:
+            x_b_raw = np.stack(
+                [x - res_x / 2, x + res_x / 2, x + res_x / 2, x - res_x / 2]
+            )
+            y_b_raw = np.stack(
+                [y - res_y / 2, y - res_y / 2, y + res_y / 2, y + res_y / 2]
+            )
 
         x_b_da = xr.DataArray(x_b_raw, dims=["nv", "x"], name="x_b")
         y_b_da = xr.DataArray(y_b_raw, dims=["nv", "y"], name="y_b")
-
-        if chunks is not None:
-            if isinstance(chunks, dict):
-                x_b_da = x_b_da.chunk({"x": chunks.get("x", -1)})
-                y_b_da = y_b_da.chunk({"y": chunks.get("y", -1)})
-            else:
-                x_b_da = x_b_da.chunk({"x": chunks})
-                y_b_da = y_b_da.chunk({"y": chunks})
 
         # Broadcast them to (nv, y, x)
         yy_b_da, xx_b_da = xr.broadcast(y_b_da, x_b_da)
@@ -614,6 +651,8 @@ def create_grid_like(
     res: Union[float, Tuple[float, float]],
     add_bounds: bool = True,
     chunks: Optional[Union[int, Dict[str, int]]] = None,
+    extent: Optional[Tuple[float, float, float, float]] = None,
+    crs: Optional[Union[str, int, Any]] = None,
 ) -> xr.Dataset:
     """
     Create a new grid dataset with the same extent and CRS as an existing object.
@@ -632,18 +671,53 @@ def create_grid_like(
         Whether to add cell boundary coordinates.
     chunks : int or dict, optional
         Chunk sizes for the resulting dask-backed dataset.
+    extent : tuple of float, optional
+        Override the detected extent (min_x, max_x, min_y, max_y).
+        Use this to avoid hidden dask.compute() if you already know the extent.
+    crs : str, int, or pyproj.CRS, optional
+        Override the detected CRS.
 
     Returns
     -------
     xr.Dataset
         The new grid dataset.
     """
-    crs_obj = get_crs_info(obj)
+    if crs is not None:
+        if pyproj is not None:
+            crs_obj = pyproj.CRS(crs)
+        else:
+            crs_obj = crs
+    else:
+        crs_obj = get_crs_info(obj)
 
     if isinstance(res, (int, float)):
         res_x = res_y = float(res)
     else:
         res_x, res_y = map(float, res)
+
+    if extent is not None:
+        if crs_obj is None or (
+            hasattr(crs_obj, "is_geographic") and crs_obj.is_geographic
+        ):
+            # Lat-Lon
+            return _create_rectilinear_grid(
+                (extent[2], extent[3]),  # lat_range
+                (extent[0], extent[1]),  # lon_range
+                res_y,  # res_lat
+                res_x,  # res_lon
+                add_bounds=add_bounds,
+                chunks=chunks,
+                crs=crs_obj.to_wkt() if hasattr(crs_obj, "to_wkt") else "EPSG:4326",
+                history_msg=(
+                    f"Created grid like {obj.name if hasattr(obj, 'name') else 'input'} "
+                    "using xregrid (Override Extent)."
+                ),
+            )
+        else:
+            # Projected
+            return create_grid_from_crs(
+                crs_obj, extent, (res_x, res_y), add_bounds=add_bounds, chunks=chunks
+            )
 
     # 1. Try to find projected coordinates
     try:
