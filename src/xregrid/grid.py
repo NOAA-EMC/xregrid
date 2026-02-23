@@ -6,6 +6,8 @@ import cf_xarray  # noqa: F401
 import numpy as np
 import xarray as xr
 
+from .utils import _find_coord
+
 
 def _get_non_spatial_dims(ds: xr.Dataset) -> set[str]:
     """
@@ -134,34 +136,6 @@ def _get_mesh_info(
                 return lon, lat, lat.shape, lat.dims, True
         except (AttributeError, KeyError):
             pass
-
-    def _find_coord(ds, key):
-        try:
-            return ds.cf[key]
-        except (KeyError, AttributeError):
-            try:
-                # Use cf.coordinates to handle ambiguity
-                matches = ds.cf.coordinates.get(key, [])
-                if not matches:
-                    # Also check axes
-                    matches = ds.cf.axes.get(key, [])
-
-                if matches:
-                    # Prefer one that matches a data variable's dimensions
-                    if hasattr(ds, "data_vars") and len(ds.data_vars) > 0:
-                        # Find first non-topology data variable
-                        for name, da in ds.data_vars.items():
-                            if da.attrs.get("cf_role") not in [
-                                "mesh_topology",
-                                "face_node_connectivity",
-                            ]:
-                                for m in matches:
-                                    if set(ds[m].dims).issubset(set(da.dims)):
-                                        return ds[m]
-                    return ds[matches[0]]
-            except Exception:
-                pass
-        return None
 
     lat = _find_coord(ds, "latitude")
     lon = _find_coord(ds, "longitude")
