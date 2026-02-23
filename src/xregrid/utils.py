@@ -374,8 +374,13 @@ def _find_coord(
                 matches = obj.cf.axes.get(key, [])
 
             if matches:
-                # Prefer one that matches a data variable's dimensions
-                if isinstance(obj, xr.Dataset) and len(obj.data_vars) > 0:
+                # Prefer one that matches the object's dimensions (if DataArray)
+                # or its data variables' dimensions (if Dataset)
+                if isinstance(obj, xr.DataArray):
+                    for m in matches:
+                        if set(obj[m].dims).issubset(set(obj.dims)):
+                            return obj[m]
+                elif isinstance(obj, xr.Dataset) and len(obj.data_vars) > 0:
                     for name, da in obj.data_vars.items():
                         if da.attrs.get("cf_role") not in [
                             "mesh_topology",

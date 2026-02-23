@@ -1672,6 +1672,28 @@ class Regridder:
             if v and v in self.target_grid_ds.data_vars:
                 target_coords_to_assign[v] = self.target_grid_ds[v]
 
+        # Ensure all variables referenced by the mesh topology are also included
+        if target_mesh_name:
+            topology_attrs = self.target_grid_ds[target_mesh_name].attrs
+            for attr in [
+                "face_node_connectivity",
+                "edge_node_connectivity",
+                "face_face_connectivity",
+                "face_edge_connectivity",
+                "edge_face_connectivity",
+                "node_coordinates",
+                "face_coordinates",
+                "edge_coordinates",
+            ]:
+                if attr in topology_attrs:
+                    ref_vars = topology_attrs[attr].split()
+                    for rv in ref_vars:
+                        if (
+                            rv in self.target_grid_ds
+                            and rv not in target_coords_to_assign
+                        ):
+                            target_coords_to_assign[rv] = self.target_grid_ds[rv]
+
         out = out.assign_coords(target_coords_to_assign)
 
         # Update grid_mapping and mesh attributes
@@ -1775,6 +1797,18 @@ class Regridder:
                 regridded_items[name] = da
                 continue
 
+            # Skip UGRID topology/connectivity variables
+            if da.attrs.get("cf_role") in [
+                "mesh_topology",
+                "face_node_connectivity",
+                "edge_node_connectivity",
+                "face_face_connectivity",
+                "face_edge_connectivity",
+                "edge_face_connectivity",
+            ]:
+                regridded_items[name] = da
+                continue
+
             # CF-Awareness: Check for spatial dimensions using logical axes
             is_regriddable = False
             if all(dim in da.dims for dim in self._dims_source):
@@ -1858,6 +1892,25 @@ class Regridder:
         for v in [target_gm_name, target_mesh_name]:
             if v and v in self.target_grid_ds.data_vars and v not in out.coords:
                 out = out.assign_coords({v: self.target_grid_ds[v]})
+
+        # Ensure all variables referenced by the mesh topology are also included
+        if target_mesh_name:
+            topology_attrs = self.target_grid_ds[target_mesh_name].attrs
+            for attr in [
+                "face_node_connectivity",
+                "edge_node_connectivity",
+                "face_face_connectivity",
+                "face_edge_connectivity",
+                "edge_face_connectivity",
+                "node_coordinates",
+                "face_coordinates",
+                "edge_coordinates",
+            ]:
+                if attr in topology_attrs:
+                    ref_vars = topology_attrs[attr].split()
+                    for rv in ref_vars:
+                        if rv in self.target_grid_ds and rv not in out:
+                            out = out.assign_coords({rv: self.target_grid_ds[rv]})
 
         # Update global grid_mapping attribute if it exists
         if target_gm_name:

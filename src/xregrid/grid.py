@@ -171,12 +171,17 @@ def _get_mesh_info(
     if lon_isel:
         lon = lon.isel(lon_isel, drop=True)
 
-    # UGRID: Check for 'mesh' and 'location' attributes to confirm unstructured
+    # UGRID: Check for 'mesh' and 'location' attributes or topology to confirm unstructured
     is_ugrid = False
     if "mesh" in lat.attrs and "location" in lat.attrs:
         is_ugrid = True
     elif "mesh" in lon.attrs and "location" in lon.attrs:
         is_ugrid = True
+    else:
+        for var in ds.variables:
+            if ds[var].attrs.get("cf_role") == "mesh_topology":
+                is_ugrid = True
+                break
 
     if lat.ndim == 2:
         # Curvilinear
