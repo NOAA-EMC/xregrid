@@ -395,10 +395,16 @@ def _find_coord(
 
     # Fallback to common names
     names = {
-        "latitude": ["lat", "latCell", "lat_face", "lat_node", "latitude"],
-        "longitude": ["lon", "lonCell", "lon_face", "lon_node", "longitude"],
+        "latitude": ["lat", "latCell", "lat_face", "lat_node", "latitude", "yc", "y"],
+        "longitude": ["lon", "lonCell", "lon_face", "lon_node", "longitude", "xc", "x"],
     }
 
+    # 1. Prioritize dimension coordinates that match fallback names
+    for name in names.get(key, []):
+        if name in obj.dims and name in obj.coords:
+            return obj[name]
+
+    # 2. Check other coordinates and data variables
     for name in names.get(key, []):
         if name in obj.coords:
             return obj.coords[name]
