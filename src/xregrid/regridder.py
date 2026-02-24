@@ -314,12 +314,9 @@ class Regridder:
                 if np.issubdtype(ds[lat_dim].dtype, np.number) and np.issubdtype(
                     ds[lon_dim].dtype, np.number
                 ):
-                    lat_vals = ds[lat_dim].values
-                    lon_vals = ds[lon_dim].values
-
-                    # Check if already ascending
-                    is_lat_asc = np.all(np.diff(lat_vals) > 0)
-                    is_lon_asc = np.all(np.diff(lon_vals) > 0)
+                    # Aero Protocol: Use indexes property instead of .values to avoid hidden computes (Flexibility)
+                    is_lat_asc = ds.indexes[lat_dim].is_monotonic_increasing
+                    is_lon_asc = ds.indexes[lon_dim].is_monotonic_increasing
 
                     if not (is_lat_asc and is_lon_asc):
                         ds = ds.sortby([lat_dim, lon_dim])

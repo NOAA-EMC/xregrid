@@ -279,10 +279,6 @@ def _get_unstructured_mesh_info(
     ----------
     ds : xr.Dataset
         The dataset containing mesh information.
-    method : str
-        The regridding method.
-    mask_var : str, optional
-        The variable name for the mask.
 
     Returns
     -------
@@ -305,18 +301,19 @@ def _get_unstructured_mesh_info(
     if hasattr(ds, "uxgrid"):
         uxgrid = getattr(ds, "uxgrid")
         try:
-            node_lat = _clip_latitudes(_to_degrees(uxgrid.node_lat)).values
-            node_lon = _normalize_longitudes(_to_degrees(uxgrid.node_lon)).values
-            conn_raw = uxgrid.face_node_connectivity.values
-            start_index = uxgrid.face_node_connectivity.attrs.get("start_index", 0)
-            fill_value = uxgrid.face_node_connectivity.attrs.get(
-                "_FillValue", -9223372036854775808
-            )
+            # Aero Protocol: Perform coordinate transformations using Xarray to maintain laziness (Flexibility)
+            node_lat_da = _clip_latitudes(_to_degrees(uxgrid.node_lat))
+            node_lon_da = _normalize_longitudes(_to_degrees(uxgrid.node_lon))
+            conn_raw_da = uxgrid.face_node_connectivity
 
-            element_conn = []
-            element_types = []
-            element_ids = []
-            orig_cell_index = []
+            # ESMF requires NumPy arrays for Mesh creation.
+            # These calls are the 'ESMF Boundary' where laziness ends.
+            node_lat = node_lat_da.values
+            node_lon = node_lon_da.values
+            conn_raw = conn_raw_da.values
+
+            start_index = conn_raw_da.attrs.get("start_index", 0)
+            fill_value = conn_raw_da.attrs.get("_FillValue", -9223372036854775808)
 
             # Vectorized triangulation (Aero Protocol: Performance)
             n_cells, max_edges = conn_raw.shape
@@ -351,14 +348,20 @@ def _get_unstructured_mesh_info(
 
     # 1. Detect MPAS
     if "verticesOnCell" in ds and "latVertex" in ds and "lonVertex" in ds:
-        node_lat = _clip_latitudes(_to_degrees(ds["latVertex"])).values
-        node_lon = _normalize_longitudes(_to_degrees(ds["lonVertex"])).values
-        conn_raw = ds["verticesOnCell"].values
-        n_edges = (
-            ds["nEdgesOnCell"].values
-            if "nEdgesOnCell" in ds
-            else np.full(ds.sizes["nCells"], conn_raw.shape[1])
-        )
+        # Aero Protocol: Perform coordinate transformations using Xarray (Flexibility)
+        node_lat_da = _clip_latitudes(_to_degrees(ds["latVertex"]))
+        node_lon_da = _normalize_longitudes(_to_degrees(ds["lonVertex"]))
+        conn_raw_da = ds["verticesOnCell"]
+
+        node_lat = node_lat_da.values
+        node_lon = node_lon_da.values
+        conn_raw = conn_raw_da.values
+
+        if "nEdgesOnCell" in ds:
+            n_edges = ds["nEdgesOnCell"].values
+        else:
+            # Backend-agnostic check for valid vertices
+            n_edges = (conn_raw_da > 0).sum(dim=conn_raw_da.dims[1]).values
 
         element_conn = []
         element_types = []
@@ -423,11 +426,17 @@ def _get_unstructured_mesh_info(
             node_lat_var = "node_lat" if "node_lat" in ds else "lat_node"
 
         if node_lon_var in ds and node_lat_var in ds:
-            node_lon = _normalize_longitudes(_to_degrees(ds[node_lon_var])).values
-            node_lat = _clip_latitudes(_to_degrees(ds[node_lat_var])).values
-            conn_raw = ds[conn_var].values
-            start_index = ds[conn_var].attrs.get("start_index", 0)
-            fill_value = ds[conn_var].attrs.get("_FillValue", -1)
+            # Aero Protocol: Perform transformations using Xarray (Flexibility)
+            node_lat_da = _clip_latitudes(_to_degrees(ds[node_lat_var]))
+            node_lon_da = _normalize_longitudes(_to_degrees(ds[node_lon_var]))
+            conn_raw_da = ds[conn_var]
+
+            node_lat = node_lat_da.values
+            node_lon = node_lon_da.values
+            conn_raw = conn_raw_da.values
+
+            start_index = conn_raw_da.attrs.get("start_index", 0)
+            fill_value = conn_raw_da.attrs.get("_FillValue", -1)
 
             element_conn = []
             element_types = []
@@ -436,7 +445,7 @@ def _get_unstructured_mesh_info(
 
             # Vectorized triangulation for UGRID (Aero Protocol: Performance)
             n_cells, max_edges = conn_raw.shape
-            n_edges = np.sum(conn_raw != fill_value, axis=1)
+            n_edges = (conn_raw_da != fill_value).sum(dim=conn_raw_da.dims[1]).values
             max_tris = max_edges - 2
 
             j = np.arange(1, max_tris + 1)
