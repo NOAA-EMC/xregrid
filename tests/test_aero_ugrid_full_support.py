@@ -5,10 +5,14 @@ from xregrid import Regridder, create_global_grid
 
 
 def create_mock_ugrid(n_nodes=10, n_faces=4):
-    """Create a mock UGRID dataset."""
-    # Nodes
-    node_x = np.linspace(0, 360, n_nodes)
-    node_y = np.linspace(-90, 90, n_nodes)
+    """Create a mock UGRID dataset with non-collinear nodes."""
+    # Create nodes in a grid-like pattern to avoid collinearity
+    n_side = int(np.ceil(np.sqrt(n_nodes)))
+    x = np.linspace(0, 360, n_side)
+    y = np.linspace(-90, 90, n_side)
+    node_x_2d, node_y_2d = np.meshgrid(x, y)
+    node_x = node_x_2d.flatten()[:n_nodes]
+    node_y = node_y_2d.flatten()[:n_nodes]
 
     # Faces (centers)
     face_x = np.linspace(10, 350, n_faces)

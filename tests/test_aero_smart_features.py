@@ -57,7 +57,8 @@ def test_auto_periodicity_lazy():
     """Verify auto-periodicity detection handles lazy coordinates without compute."""
     # To test truly lazy coordinates, they must NOT be dimension coordinates
     lat = da.linspace(-90, 90, 10, chunks=5)
-    lon = da.linspace(0, 360, 20, chunks=10)
+    # Use 0 to 360 but exclude the last point to be compatible with ESMF periodic
+    lon = da.linspace(0, 360, 21, chunks=10)[:-1]
 
     ds_lazy = xr.Dataset(
         data_vars={"data": (["y", "x"], da.random.random((10, 20), chunks=(5, 10)))},
