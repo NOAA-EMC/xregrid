@@ -1838,10 +1838,11 @@ class Regridder:
                 if not hasattr(lon.data, "dask"):
                     lon_min = float(lon.min())
                     lon_max = float(lon.max())
-                    if abs((lon_max - lon_min) - 360.0) < 5.0:
-                        return True
-                    # Handle grids like -180 to 180
-                    if abs((lon_max - lon_min) - 360.0) < 1.0:
+                    extent = lon_max - lon_min
+                    # ESMF periodic grids must have extent strictly less than 360
+                    # because the periodicity is handled by connecting the last point to the first.
+                    # If extent is 360, the last point is a duplicate of the first and ESMF will fail.
+                    if 340.0 <= extent < 360.0:
                         return True
 
                 # 3. Last fallback: Check dimension name
