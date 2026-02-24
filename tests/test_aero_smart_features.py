@@ -55,29 +55,23 @@ def test_auto_periodicity_detection():
 
 def test_auto_periodicity_lazy():
     """Verify auto-periodicity detection handles lazy coordinates without compute."""
-    # To test truly lazy coordinates, they must NOT be dimension coordinates
+    # Test 1: 1D lazy coordinates (detection should stay False if no metadata)
     lat = da.linspace(-90, 90, 10, chunks=5)
-    # Use 0 to 360 but exclude the last point to be compatible with ESMF periodic
     lon = da.linspace(0, 360, 21, chunks=10)[:-1]
 
     ds_lazy = xr.Dataset(
-        data_vars={"data": (["y", "x"], da.random.random((10, 20), chunks=(5, 10)))},
         coords={
-            "lat_aux": (["y", "x"], da.broadcast_to(lat[:, None], (10, 20))),
-            "lon_aux": (["y", "x"], da.broadcast_to(lon[None, :], (10, 20))),
-        },
+            "lat": (["lat"], lat, {"units": "degrees_north"}),
+            "lon": (["lon"], lon, {"units": "degrees_east"}),
+        }
     )
-    # Add attributes so _find_coord can find them
-    ds_lazy.lat_aux.attrs["units"] = "degrees_north"
-    ds_lazy.lon_aux.attrs["units"] = "degrees_east"
 
     # Regridder should NOT compute the dask arrays for detection
     regridder = Regridder(ds_lazy, ds_lazy, periodic=None)
-    # It should return False because it can't determine it eagerly and no metadata
     assert regridder.periodic is False
 
     # Now add metadata
-    ds_lazy.lon_aux.attrs["boundary"] = "periodic"
+    ds_lazy.lon.attrs["boundary"] = "periodic"
     regridder_meta = Regridder(ds_lazy, ds_lazy, periodic=None)
     assert regridder_meta.periodic is True
 

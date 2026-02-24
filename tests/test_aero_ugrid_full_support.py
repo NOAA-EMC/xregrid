@@ -14,6 +14,11 @@ def create_mock_ugrid(n_nodes=10, n_faces=4):
     node_x = node_x_2d.flatten()[:n_nodes]
     node_y = node_y_2d.flatten()[:n_nodes]
 
+    # Add jitter to avoid collinearity
+    rng = np.random.default_rng(42)
+    node_x += rng.standard_normal(n_nodes) * 0.1
+    node_y += rng.standard_normal(n_nodes) * 0.1
+
     # Faces (centers)
     face_x = np.linspace(10, 350, n_faces)
     face_y = np.linspace(-80, 80, n_faces)

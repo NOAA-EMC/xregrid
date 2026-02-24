@@ -1714,20 +1714,17 @@ class Regridder:
         for c in self.target_grid_ds.coords:
             # Include coordinates that match target dimensions OR are scalar/mapping
             # Aero Protocol: Ensure assigned coordinates are dimensionally compatible with the output
-            if (
-                set(self.target_grid_ds.coords[c].dims).issubset(set(self._dims_target))
-                or c in [target_gm_name, target_mesh_name]
-            ) and set(self.target_grid_ds.coords[c].dims).issubset(set(out.dims)):
+            c_dims = set(self.target_grid_ds.coords[c].dims)
+            out_dims = set(out.dims)
+            if (c_dims.issubset(set(self._dims_target)) or c in [target_gm_name, target_mesh_name]) and c_dims.issubset(out_dims):
                 target_coords_to_assign[c] = self.target_grid_ds.coords[c]
 
         # Also check data_vars for topology/mapping that might be needed as coords
         for v in [target_gm_name, target_mesh_name]:
-            if (
-                v
-                and v in self.target_grid_ds.data_vars
-                and set(self.target_grid_ds[v].dims).issubset(set(out.dims))
-            ):
-                target_coords_to_assign[v] = self.target_grid_ds[v]
+            if v and v in self.target_grid_ds.data_vars:
+                v_dims = set(self.target_grid_ds[v].dims)
+                if v_dims.issubset(set(out.dims)):
+                    target_coords_to_assign[v] = self.target_grid_ds[v]
 
         # Ensure all variables referenced by the mesh topology are also included
         if target_mesh_name:
@@ -1748,9 +1745,10 @@ class Regridder:
                         if (
                             rv in self.target_grid_ds
                             and rv not in target_coords_to_assign
-                            and set(self.target_grid_ds[rv].dims).issubset(set(out.dims))
                         ):
-                            target_coords_to_assign[rv] = self.target_grid_ds[rv]
+                            rv_dims = set(self.target_grid_ds[rv].dims)
+                            if rv_dims.issubset(set(out.dims)):
+                                target_coords_to_assign[rv] = self.target_grid_ds[rv]
 
         out = out.assign_coords(target_coords_to_assign)
 
@@ -1836,7 +1834,7 @@ class Regridder:
             from xregrid.utils import _find_coord
 
             lon = _find_coord(ds, "longitude")
-            if lon is not None:
+            if lon is not None and lon.ndim == 1:
                 # 1. Check metadata
                 if lon.attrs.get("boundary") == "periodic":
                     return True

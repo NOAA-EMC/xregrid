@@ -456,9 +456,7 @@ def test_regridder_validate_weights_errors(tmp_path):
     )
 
     with pytest.raises(ValueError, match="does not match loaded weights periodic"):
-        Regridder.from_weights(
-            weight_file, src, tgt, periodic=not regridder.periodic
-        )
+        Regridder.from_weights(weight_file, src, tgt, periodic=not regridder.periodic)
 
     with pytest.raises(ValueError, match="does not match loaded weights skipna"):
         Regridder.from_weights(weight_file, src, tgt, skipna=True)
