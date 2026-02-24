@@ -1716,7 +1716,10 @@ class Regridder:
             # Aero Protocol: Ensure assigned coordinates are dimensionally compatible with the output
             c_dims = set(self.target_grid_ds.coords[c].dims)
             out_dims = set(out.dims)
-            if (c_dims.issubset(set(self._dims_target)) or c in [target_gm_name, target_mesh_name]) and c_dims.issubset(out_dims):
+            if (
+                c_dims.issubset(set(self._dims_target))
+                or c in [target_gm_name, target_mesh_name]
+            ) and c_dims.issubset(out_dims):
                 target_coords_to_assign[c] = self.target_grid_ds.coords[c]
 
         # Also check data_vars for topology/mapping that might be needed as coords
@@ -1833,8 +1836,8 @@ class Regridder:
         try:
             from xregrid.utils import _find_coord
 
-            lon = _find_coord(ds, "longitude")
-            if lon is not None and lon.ndim == 1:
+            lon = _find_coord(ds, "lon")
+            if lon is not None:
                 # 1. Check metadata
                 if lon.attrs.get("boundary") == "periodic":
                     return True

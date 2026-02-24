@@ -55,18 +55,22 @@ def test_auto_periodicity_detection():
 
 def test_auto_periodicity_lazy():
     """Verify auto-periodicity detection handles lazy coordinates without compute."""
-    # Test 1: 1D lazy coordinates (detection should stay False if no metadata)
-    lat = da.linspace(-90, 90, 10, chunks=5)
-    lon = da.linspace(0, 360, 21, chunks=10)[:-1]
+    # Test 1: 2D lazy coordinates (not indexes, so they stay lazy)
+    # Dimension coordinates (1D) are often loaded by Xarray for indexing.
+    y, x = da.meshgrid(da.linspace(-90, 90, 10), da.linspace(0, 342, 20), indexing="ij")
+    y = y.rechunk(5)
+    x = x.rechunk(10)
 
     ds_lazy = xr.Dataset(
+        data_vars={"data": (["y", "x"], da.zeros((10, 20), chunks=(5, 10)))},
         coords={
-            "lat": (["lat"], lat, {"units": "degrees_north"}),
-            "lon": (["lon"], lon, {"units": "degrees_east"}),
-        }
+            "lat": (["y", "x"], y, {"units": "degrees_north"}),
+            "lon": (["y", "x"], x, {"units": "degrees_east"}),
+        },
     )
 
     # Regridder should NOT compute the dask arrays for detection
+    # Since they are lazy and no metadata is present, it should default to False
     regridder = Regridder(ds_lazy, ds_lazy, periodic=None)
     assert regridder.periodic is False
 
