@@ -157,7 +157,10 @@ class Regridder:
         # Initialize ESMF Manager (required for some environments)
         try:
             import esmpy
+        except ImportError:
+            esmpy = None
 
+        if esmpy is not None:
             if mpi:
                 # Use MULTI logkind for MPI parallelization
                 # Some versions of esmpy don't support logkind in Manager constructor
@@ -169,7 +172,7 @@ class Regridder:
                     self._manager = esmpy.Manager(debug=False)
             else:
                 self._manager = esmpy.Manager(debug=False)
-        except ImportError:
+        else:
             self._manager = None
 
         self.source_grid_ds = source_grid_ds
@@ -192,23 +195,10 @@ class Regridder:
         self.extrap_dist_exponent = extrap_dist_exponent
 
         # Determine coordinate system for consistency
-        try:
-            import esmpy
-
+        if esmpy is not None:
             self._coord_sys = (
                 esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART
             )
-        except ImportError:
-            self._coord_sys = None
-
-        # Robust coordinate handling: internally sort coordinates to be ascending
-        # to ensure ESMF weight generation is stable and avoid boundary issues.
-        self.source_grid_ds, self._src_was_sorted = self._normalize_grid(source_grid_ds)
-        self.target_grid_ds, self._tgt_was_sorted = self._normalize_grid(target_grid_ds)
-
-        try:
-            import esmpy
-
             self.method_map = {
                 "bilinear": esmpy.RegridMethod.BILINEAR,
                 "conservative": esmpy.RegridMethod.CONSERVE,
@@ -222,9 +212,15 @@ class Regridder:
                 "nearest_idw": esmpy.ExtrapMethod.NEAREST_IDAVG,
                 "creep_fill": esmpy.ExtrapMethod.CREEP_FILL,
             }
-        except ImportError:
+        else:
+            self._coord_sys = None
             self.method_map = {}
             self.extrap_method_map = {}
+
+        # Robust coordinate handling: internally sort coordinates to be ascending
+        # to ensure ESMF weight generation is stable and avoid boundary issues.
+        self.source_grid_ds, self._src_was_sorted = self._normalize_grid(source_grid_ds)
+        self.target_grid_ds, self._tgt_was_sorted = self._normalize_grid(target_grid_ds)
 
         # Internal state
         self._shape_source: Optional[Tuple[int, ...]] = None

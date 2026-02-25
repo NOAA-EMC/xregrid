@@ -291,6 +291,14 @@ def plot_interactive(
             "HvPlot is required for plot_interactive. "
             "Install it with `pip install hvplot`."
         )
+
+    # Automated CRS discovery for Track B (Interactive)
+    # This ensures "No Ambiguous Plots" even in exploratory mode.
+    if "geo" not in kwargs:
+        crs_obj = get_crs_info(da)
+        if crs_obj:
+            kwargs["geo"] = True
+
     return da.hvplot(rasterize=rasterize, title=title, **kwargs)
 
 

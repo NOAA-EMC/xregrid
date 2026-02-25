@@ -17,6 +17,11 @@ try:
 except ImportError:
     da = None
 
+try:
+    import dask
+except ImportError:
+    dask = None
+
 import xarray as xr
 
 
@@ -767,6 +772,11 @@ def create_grid_like(
     else:
         res_x, res_y = map(float, res)
 
+    obj_name = getattr(obj, "name", "input")
+    history_msg_base = f"Created grid like {obj_name} using xregrid."
+    if hasattr(obj, "attrs") and "history" in obj.attrs:
+        history_msg_base += f"\nTemplate history:\n{obj.attrs['history']}"
+
     if extent is not None:
         if crs_obj is None or (
             hasattr(crs_obj, "is_geographic") and crs_obj.is_geographic
@@ -780,10 +790,7 @@ def create_grid_like(
                 add_bounds=add_bounds,
                 chunks=chunks,
                 crs=crs_obj.to_wkt() if hasattr(crs_obj, "to_wkt") else "EPSG:4326",
-                history_msg=(
-                    f"Created grid like {obj.name if hasattr(obj, 'name') else 'input'} "
-                    "using xregrid (Override Extent)."
-                ),
+                history_msg=history_msg_base + " (Override Extent).",
             )
         else:
             # Projected
@@ -802,19 +809,18 @@ def create_grid_like(
             y_b = obj.cf.get_bounds("projection_y_coordinate")
 
             # Batch compute if lazy to minimize roundtrips
-            if hasattr(x_b.data, "dask") or hasattr(y_b.data, "dask"):
-                try:
-                    import dask
-
-                    vals = dask.compute(x_b.min(), x_b.max(), y_b.min(), y_b.max())
-                    extent = tuple(map(float, vals))
-                except ImportError:
-                    extent = (
-                        float(x_b.min()),
-                        float(x_b.max()),
-                        float(y_b.min()),
-                        float(y_b.max()),
-                    )
+            if dask is not None and (
+                hasattr(x_b.data, "dask") or hasattr(y_b.data, "dask")
+            ):
+                vals = dask.compute(x_b.min(), x_b.max(), y_b.min(), y_b.max())
+                extent = tuple(map(float, vals))
+            elif hasattr(x_b.data, "dask") or hasattr(y_b.data, "dask"):
+                extent = (
+                    float(x_b.min()),
+                    float(x_b.max()),
+                    float(y_b.min()),
+                    float(y_b.max()),
+                )
             else:
                 extent = (
                     float(x_b.min()),
@@ -825,51 +831,48 @@ def create_grid_like(
         except Exception:
             # Fallback to centers
             # Discovery logic: we need min/max and average diff for heuristic
-            if hasattr(x_da.data, "dask") or hasattr(y_da.data, "dask"):
-                try:
-                    import dask
+            if dask is not None and (
+                hasattr(x_da.data, "dask") or hasattr(y_da.data, "dask")
+            ):
+                # Batch everything!
+                tasks = [x_da.min(), x_da.max(), y_da.min(), y_da.max()]
+                if x_da.size > 1:
+                    tasks.append(abs(x_da.diff(x_da.dims[0]).mean()))
+                if y_da.size > 1:
+                    tasks.append(abs(y_da.diff(y_da.dims[0]).mean()))
 
-                    # Batch everything!
-                    tasks = [x_da.min(), x_da.max(), y_da.min(), y_da.max()]
-                    if x_da.size > 1:
-                        tasks.append(abs(x_da.diff(x_da.dims[0]).mean()))
-                    if y_da.size > 1:
-                        tasks.append(abs(y_da.diff(y_da.dims[0]).mean()))
+                results = dask.compute(*tasks)
+                x_min, x_max, y_min, y_max = map(float, results[:4])
 
-                    results = dask.compute(*tasks)
-                    x_min, x_max, y_min, y_max = map(float, results[:4])
+                res_x_orig = float(results[4]) if x_da.size > 1 else 0
+                res_y_orig = (
+                    float(results[5])
+                    if y_da.size > 1
+                    else (res_x_orig if y_da.size == 1 else 0)
+                )
 
-                    res_x_orig = float(results[4]) if x_da.size > 1 else 0
-                    res_y_orig = (
-                        float(results[5])
-                        if y_da.size > 1
-                        else (res_x_orig if y_da.size == 1 else 0)
-                    )
-
-                    extent = (
-                        x_min - res_x_orig / 2,
-                        x_max + res_x_orig / 2,
-                        y_min - res_y_orig / 2,
-                        y_max + res_y_orig / 2,
-                    )
-                except ImportError:
-                    # Non-batched fallback
-                    res_x_orig = (
-                        abs(float(x_da.diff(x_da.dims[0]).mean()))
-                        if x_da.size > 1
-                        else 0
-                    )
-                    res_y_orig = (
-                        abs(float(y_da.diff(y_da.dims[0]).mean()))
-                        if y_da.size > 1
-                        else res_x_orig
-                    )
-                    extent = (
-                        float(x_da.min()) - res_x_orig / 2,
-                        float(x_da.max()) + res_x_orig / 2,
-                        float(y_da.min()) - res_y_orig / 2,
-                        float(y_da.max()) + res_y_orig / 2,
-                    )
+                extent = (
+                    x_min - res_x_orig / 2,
+                    x_max + res_x_orig / 2,
+                    y_min - res_y_orig / 2,
+                    y_max + res_y_orig / 2,
+                )
+            elif hasattr(x_da.data, "dask") or hasattr(y_da.data, "dask"):
+                # Non-batched fallback
+                res_x_orig = (
+                    abs(float(x_da.diff(x_da.dims[0]).mean())) if x_da.size > 1 else 0
+                )
+                res_y_orig = (
+                    abs(float(y_da.diff(y_da.dims[0]).mean()))
+                    if y_da.size > 1
+                    else res_x_orig
+                )
+                extent = (
+                    float(x_da.min()) - res_x_orig / 2,
+                    float(x_da.max()) + res_x_orig / 2,
+                    float(y_da.min()) - res_y_orig / 2,
+                    float(y_da.max()) + res_y_orig / 2,
+                )
             else:
                 res_x_orig = (
                     abs(float(x_da.diff(x_da.dims[0]).mean())) if x_da.size > 1 else 0
@@ -908,69 +911,65 @@ def create_grid_like(
             lat_b = obj.cf.get_bounds("latitude")
             lon_b = obj.cf.get_bounds("longitude")
 
-            if hasattr(lat_b.data, "dask") or hasattr(lon_b.data, "dask"):
-                try:
-                    import dask
-
-                    vals = dask.compute(
-                        lat_b.min(), lat_b.max(), lon_b.min(), lon_b.max()
-                    )
-                    lat_range = (float(vals[0]), float(vals[1]))
-                    lon_range = (float(vals[2]), float(vals[3]))
-                except ImportError:
-                    lat_range = (float(lat_b.min()), float(lat_b.max()))
-                    lon_range = (float(lon_b.min()), float(lon_b.max()))
+            if dask is not None and (
+                hasattr(lat_b.data, "dask") or hasattr(lon_b.data, "dask")
+            ):
+                vals = dask.compute(lat_b.min(), lat_b.max(), lon_b.min(), lon_b.max())
+                lat_range = (float(vals[0]), float(vals[1]))
+                lon_range = (float(vals[2]), float(vals[3]))
+            elif hasattr(lat_b.data, "dask") or hasattr(lon_b.data, "dask"):
+                lat_range = (float(lat_b.min()), float(lat_b.max()))
+                lon_range = (float(lon_b.min()), float(lon_b.max()))
             else:
                 lat_range = (float(lat_b.min()), float(lat_b.max()))
                 lon_range = (float(lon_b.min()), float(lon_b.max()))
         except Exception:
             # Heuristic for resolution to calculate extent from centers
-            if hasattr(lat_da.data, "dask") or hasattr(lon_da.data, "dask"):
-                try:
-                    import dask
+            if dask is not None and (
+                hasattr(lat_da.data, "dask") or hasattr(lon_da.data, "dask")
+            ):
+                tasks = [lat_da.min(), lat_da.max(), lon_da.min(), lon_da.max()]
+                if lat_da.size > 1:
+                    tasks.append(abs(lat_da.diff(lat_da.dims[0]).mean()))
+                if lon_da.size > 1:
+                    tasks.append(abs(lon_da.diff(lon_da.dims[-1]).mean()))
 
-                    tasks = [lat_da.min(), lat_da.max(), lon_da.min(), lon_da.max()]
-                    if lat_da.size > 1:
-                        tasks.append(abs(lat_da.diff(lat_da.dims[0]).mean()))
-                    if lon_da.size > 1:
-                        tasks.append(abs(lon_da.diff(lon_da.dims[-1]).mean()))
+                results = dask.compute(*tasks)
+                lat_min, lat_max, lon_min, lon_max = map(float, results[:4])
+                res_lat_orig = float(results[4]) if lat_da.size > 1 else 0
+                res_lon_orig = (
+                    float(results[5])
+                    if lon_da.size > 1
+                    else (res_lat_orig if lon_da.size == 1 else 0)
+                )
 
-                    results = dask.compute(*tasks)
-                    lat_min, lat_max, lon_min, lon_max = map(float, results[:4])
-                    res_lat_orig = float(results[4]) if lat_da.size > 1 else 0
-                    res_lon_orig = (
-                        float(results[5])
-                        if lon_da.size > 1
-                        else (res_lat_orig if lon_da.size == 1 else 0)
-                    )
-
-                    lat_range = (
-                        lat_min - res_lat_orig / 2,
-                        lat_max + res_lat_orig / 2,
-                    )
-                    lon_range = (
-                        lon_min - res_lon_orig / 2,
-                        lon_max + res_lon_orig / 2,
-                    )
-                except ImportError:
-                    res_lat_orig = (
-                        abs(float(lat_da.diff(lat_da.dims[0]).mean()))
-                        if lat_da.size > 1
-                        else 0
-                    )
-                    res_lon_orig = (
-                        abs(float(lon_da.diff(lon_da.dims[-1]).mean()))
-                        if lon_da.size > 1
-                        else res_lat_orig
-                    )
-                    lat_range = (
-                        float(lat_da.min()) - res_lat_orig / 2,
-                        float(lat_da.max()) + res_lat_orig / 2,
-                    )
-                    lon_range = (
-                        float(lon_da.min()) - res_lon_orig / 2,
-                        float(lon_da.max()) + res_lon_orig / 2,
-                    )
+                lat_range = (
+                    lat_min - res_lat_orig / 2,
+                    lat_max + res_lat_orig / 2,
+                )
+                lon_range = (
+                    lon_min - res_lon_orig / 2,
+                    lon_max + res_lon_orig / 2,
+                )
+            elif hasattr(lat_da.data, "dask") or hasattr(lon_da.data, "dask"):
+                res_lat_orig = (
+                    abs(float(lat_da.diff(lat_da.dims[0]).mean()))
+                    if lat_da.size > 1
+                    else 0
+                )
+                res_lon_orig = (
+                    abs(float(lon_da.diff(lon_da.dims[-1]).mean()))
+                    if lon_da.size > 1
+                    else res_lat_orig
+                )
+                lat_range = (
+                    float(lat_da.min()) - res_lat_orig / 2,
+                    float(lat_da.max()) + res_lat_orig / 2,
+                )
+                lon_range = (
+                    float(lon_da.min()) - res_lon_orig / 2,
+                    float(lon_da.max()) + res_lon_orig / 2,
+                )
             else:
                 res_lat_orig = (
                     abs(float(lat_da.diff(lat_da.dims[0]).mean()))
@@ -999,10 +998,7 @@ def create_grid_like(
             add_bounds=add_bounds,
             chunks=chunks,
             crs=crs_obj.to_wkt() if crs_obj else "EPSG:4326",
-            history_msg=(
-                f"Created grid like {obj.name if hasattr(obj, 'name') else 'input'} "
-                "using xregrid."
-            ),
+            history_msg=history_msg_base,
         )
     except (KeyError, AttributeError, ValueError):
         raise ValueError(
