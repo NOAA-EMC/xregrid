@@ -835,20 +835,28 @@ def create_grid_like(
                 hasattr(x_da.data, "dask") or hasattr(y_da.data, "dask")
             ):
                 # Batch everything!
-                tasks = [x_da.min(), x_da.max(), y_da.min(), y_da.max()]
+                tasks_dict = {
+                    "x_min": x_da.min(),
+                    "x_max": x_da.max(),
+                    "y_min": y_da.min(),
+                    "y_max": y_da.max(),
+                }
                 if x_da.size > 1:
-                    tasks.append(abs(x_da.diff(x_da.dims[0]).mean()))
+                    tasks_dict["res_x"] = abs(x_da.diff(x_da.dims[0]).mean())
                 if y_da.size > 1:
-                    tasks.append(abs(y_da.diff(y_da.dims[0]).mean()))
+                    tasks_dict["res_y"] = abs(y_da.diff(y_da.dims[0]).mean())
 
-                results = dask.compute(*tasks)
-                x_min, x_max, y_min, y_max = map(float, results[:4])
+                results = dask.compute(tasks_dict)[0]
+                x_min, x_max, y_min, y_max = (
+                    float(results["x_min"]),
+                    float(results["x_max"]),
+                    float(results["y_min"]),
+                    float(results["y_max"]),
+                )
 
-                res_x_orig = float(results[4]) if x_da.size > 1 else 0
-                res_y_orig = (
-                    float(results[5])
-                    if y_da.size > 1
-                    else (res_x_orig if y_da.size == 1 else 0)
+                res_x_orig = float(results.get("res_x", 0))
+                res_y_orig = float(
+                    results.get("res_y", res_x_orig if res_x_orig else 0)
                 )
 
                 extent = (
@@ -928,19 +936,28 @@ def create_grid_like(
             if dask is not None and (
                 hasattr(lat_da.data, "dask") or hasattr(lon_da.data, "dask")
             ):
-                tasks = [lat_da.min(), lat_da.max(), lon_da.min(), lon_da.max()]
+                tasks_dict = {
+                    "lat_min": lat_da.min(),
+                    "lat_max": lat_da.max(),
+                    "lon_min": lon_da.min(),
+                    "lon_max": lon_da.max(),
+                }
                 if lat_da.size > 1:
-                    tasks.append(abs(lat_da.diff(lat_da.dims[0]).mean()))
+                    tasks_dict["res_lat"] = abs(lat_da.diff(lat_da.dims[0]).mean())
                 if lon_da.size > 1:
-                    tasks.append(abs(lon_da.diff(lon_da.dims[-1]).mean()))
+                    tasks_dict["res_lon"] = abs(lon_da.diff(lon_da.dims[-1]).mean())
 
-                results = dask.compute(*tasks)
-                lat_min, lat_max, lon_min, lon_max = map(float, results[:4])
-                res_lat_orig = float(results[4]) if lat_da.size > 1 else 0
-                res_lon_orig = (
-                    float(results[5])
-                    if lon_da.size > 1
-                    else (res_lat_orig if lon_da.size == 1 else 0)
+                results = dask.compute(tasks_dict)[0]
+                lat_min, lat_max, lon_min, lon_max = (
+                    float(results["lat_min"]),
+                    float(results["lat_max"]),
+                    float(results["lon_min"]),
+                    float(results["lon_max"]),
+                )
+
+                res_lat_orig = float(results.get("res_lat", 0))
+                res_lon_orig = float(
+                    results.get("res_lon", res_lat_orig if res_lat_orig else 0)
                 )
 
                 lat_range = (

@@ -1,7 +1,7 @@
 import numpy as np
 import xarray as xr
-import pytest
-from xregrid.utils import create_grid_like, update_history
+from xregrid.utils import create_grid_like
+
 
 def test_create_grid_like_enhanced_provenance():
     """
@@ -17,7 +17,7 @@ def test_create_grid_like_enhanced_provenance():
             "lat": np.linspace(-90, 90, 10),
             "lon": np.linspace(0, 360, 20),
         },
-        name="my_data"
+        name="my_data",
     )
     template.attrs["history"] = "Original data history."
 
@@ -44,6 +44,7 @@ def test_create_grid_like_enhanced_provenance():
     assert hasattr(ds_lazy.lat_b.data, "dask")
     assert hasattr(ds_lazy.lon_b.data, "dask")
 
+
 def test_create_grid_like_override_extent():
     """
     Test create_grid_like with explicit extent override to avoid computes.
@@ -54,13 +55,37 @@ def test_create_grid_like_override_extent():
         coords={
             "lat": np.linspace(-90, 90, 10),
             "lon": np.linspace(0, 360, 20),
-        }
+        },
     )
 
     # Override extent
-    extent = (0, 180, -45, 45) # min_lon, max_lon, min_lat, max_lat
+    extent = (0, 180, -45, 45)  # min_lon, max_lon, min_lat, max_lat
     ds = create_grid_like(template, res=10, extent=extent)
 
-    assert ds.lat.min() == -40 # -45 + 10/2
-    assert ds.lon.min() == 5   # 0 + 10/2
+    assert ds.lat.min() == -40  # -45 + 10/2
+    assert ds.lon.min() == 5  # 0 + 10/2
     assert "(Override Extent)." in ds.attrs["history"]
+
+
+def test_create_grid_like_size_1():
+    """
+    Test create_grid_like with size-1 dimension to verify IndexError fix.
+    """
+    # Eager case
+    template = xr.DataArray(
+        np.random.rand(1, 20),
+        dims=["lat", "lon"],
+        coords={
+            "lat": [0.0],
+            "lon": np.linspace(0, 360, 20),
+        },
+    )
+
+    # This should not raise IndexError
+    ds = create_grid_like(template, res=10)
+    assert ds.lon.size > 0
+
+    # Lazy case (triggers dask.compute logic)
+    template_lazy = template.chunk({"lon": 10})
+    ds_lazy = create_grid_like(template_lazy, res=10)
+    assert ds_lazy.lon.size > 0
