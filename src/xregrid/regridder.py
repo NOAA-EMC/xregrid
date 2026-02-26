@@ -30,6 +30,11 @@ if TYPE_CHECKING:
     import dask.distributed
     from scipy.sparse import csr_matrix
 
+try:
+    from dask.base import is_dask_collection
+except ImportError:
+    is_dask_collection = None  # type: ignore
+
 # Global cache for the driver to store distributed futures
 # Keyed by (client_id, weight_key)
 _DRIVER_CACHE: dict = {}
@@ -1402,18 +1407,8 @@ class Regridder:
         if na_thres is None:
             na_thres = self.na_thres
 
-        # Gather weights if input is eager (NumPy) but weights are lazy (Dask Future)
-        is_lazy_input = False
-        if isinstance(obj, xr.DataArray):
-            is_lazy_input = hasattr(obj.data, "dask")
-        elif isinstance(obj, xr.Dataset):
-            # Check if any data variable is dask-backed
-            is_lazy_input = any(hasattr(v.data, "dask") for v in obj.data_vars.values())
-
-        if not is_lazy_input and hasattr(self._weights_matrix, "key"):
-            self._weights_matrix = self._dask_client.gather(self._weights_matrix)
-            if hasattr(self._total_weights, "key"):
-                self._total_weights = self._dask_client.gather(self._total_weights)
+        # Aero Protocol: Weight dispatch is now handled per-variable in _regrid_dataarray
+        # to robustly support mixed-backend (NumPy/Dask) Datasets.
 
         if isinstance(obj, xr.Dataset):
             # Sort input object if source grid was normalized
@@ -1494,6 +1489,21 @@ class Regridder:
             skipna = self.skipna
         if na_thres is None:
             na_thres = self.na_thres
+
+        # Backend-agnostic Dask detection
+        is_lazy = False
+        if is_dask_collection:
+            is_lazy = is_dask_collection(da_in.data)
+        else:
+            is_lazy = hasattr(da_in.data, "dask")
+
+        # Just-in-Time weight gathering for mixed-backend support.
+        # If the input is eager (NumPy) but weights are still remote Futures,
+        # we must gather them to the driver for local application.
+        if not is_lazy and hasattr(self._weights_matrix, "key"):
+            self._weights_matrix = self._dask_client.gather(self._weights_matrix)
+            if hasattr(self._total_weights, "key"):
+                self._total_weights = self._dask_client.gather(self._total_weights)
 
         # If skipna is True, we need _total_weights.
         # If it was not computed during init, compute it now.
@@ -1598,7 +1608,7 @@ class Regridder:
 
         # Optimization: Use worker-local cache for weights and total_weights to avoid
         # serialization overhead when using Dask.
-        if hasattr(da_in.data, "dask"):
+        if is_lazy:
             client = self._dask_client
             if client is None:
                 try:
