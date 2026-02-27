@@ -1276,16 +1276,22 @@ class Regridder:
             f"{quality_str})"
         )
 
-    def plot_weights(self, row_idx: int, **kwargs: Any) -> Any:
+    def plot_weights(self, row_idx: int, mode: str = "static", **kwargs: Any) -> Any:
         """
-        Track A: Visualize source points contributing to a specific destination point.
+        Visualize source points contributing to a specific destination point.
+
+        Two-Track Rule:
+        - mode='static' (Track A): Publication-quality plot using Matplotlib/Cartopy.
+        - mode='interactive' (Track B): Exploratory plot using HvPlot/HoloViews.
 
         Parameters
         ----------
         row_idx : int
             The index of the destination point (0-based).
+        mode : str, default 'static'
+            The plotting mode: 'static' or 'interactive'.
         **kwargs : Any
-            Additional arguments passed to plot_static.
+            Additional arguments passed to the plotting functions.
 
         Returns
         -------
@@ -1294,7 +1300,7 @@ class Regridder:
         """
         from .viz import plot_weights as _plot_weights
 
-        return _plot_weights(self, row_idx, **kwargs)
+        return _plot_weights(self, row_idx, mode=mode, **kwargs)
 
     def plot_comparison(
         self,
