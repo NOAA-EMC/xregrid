@@ -679,7 +679,9 @@ def plot_weights(
         return _plot_weights_static(regridder, row_idx, **kwargs)
     elif mode == "interactive":
         rasterize = kwargs.pop("rasterize", True)
-        return plot_weights_interactive(regridder, row_idx, rasterize=rasterize, **kwargs)
+        return plot_weights_interactive(
+            regridder, row_idx, rasterize=rasterize, **kwargs
+        )
     else:
         raise ValueError(
             f"Unknown plotting mode: '{mode}'. Must be 'static' or 'interactive'."
