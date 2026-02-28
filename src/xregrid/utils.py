@@ -1208,3 +1208,129 @@ def get_rdhpcs_cluster(
         )
 
     return SLURMCluster(**defaults)
+
+
+def spatial_slice(
+    obj: Union[xr.DataArray, xr.Dataset],
+    extent: Tuple[float, float, float, float],
+    crs: Optional[Union[str, int, Any]] = None,
+    buffer: float = 0.0,
+) -> Union[xr.DataArray, xr.Dataset]:
+    """
+    Slice an xarray object to a spatial extent, handling longitude wrapping.
+
+    This function identifies spatial dimensions via cf-xarray and performs
+    a backend-agnostic slice. For geographic coordinates, it robustly
+    handles longitude wrapping (e.g., slicing a 0-360 grid with a -20 to 20 extent).
+
+    Parameters
+    ----------
+    obj : xr.DataArray or xr.Dataset
+        The input object to slice.
+    extent : tuple of float
+        Spatial extent as (min_x, max_x, min_y, max_y).
+    crs : str, int, or pyproj.CRS, optional
+        The CRS of the provided extent. If None, assumes the same CRS as obj.
+    buffer : float, default 0.0
+        Extra buffer to add around the extent in coordinate units.
+
+    Returns
+    -------
+    xr.DataArray or xr.Dataset
+        The spatially sliced object.
+
+    Notes
+    -----
+    For longitude wrapping, if the requested extent crosses the grid's
+    discontinuity, the result will be concatenated along the longitude dimension.
+    """
+    # 1. Coordinate and Dimension Discovery
+    lat_da = _find_coord(obj, "latitude")
+    lon_da = _find_coord(obj, "longitude")
+
+    if lat_da is None or lon_da is None:
+        try:
+            x_da = obj.cf["projection_x_coordinate"]
+            y_da = obj.cf["projection_y_coordinate"]
+            is_geographic = False
+        except (KeyError, AttributeError):
+            raise ValueError(
+                "Could not detect spatial coordinates (lat/lon or x/y) for slicing. "
+                "Ensure your data has CF-compliant coordinates."
+            )
+    else:
+        x_da, y_da = lon_da, lat_da
+        is_geographic = True
+
+    # 2. CRS Transformation
+    if crs is not None:
+        if pyproj is None:
+            raise ImportError(
+                "pyproj is required for CRS-aware slicing. "
+                "Install it with `pip install pyproj`."
+            )
+        target_crs = get_crs_info(obj) or pyproj.CRS("EPSG:4326")
+        transformer = pyproj.Transformer.from_crs(crs, target_crs, always_xy=True)
+
+        # Transform bbox by checking 4 corners
+        x_pts = [extent[0], extent[1], extent[1], extent[0]]
+        y_pts = [extent[2], extent[2], extent[3], extent[3]]
+        xx, yy = transformer.transform(x_pts, y_pts)
+        extent = (min(xx), max(xx), min(yy), max(yy))
+
+    min_x, max_x, min_y, max_y = extent
+    min_x -= buffer
+    max_x += buffer
+    min_y -= buffer
+    max_y += buffer
+
+    # 3. Y-Slicing (Latitude or Projection Y)
+    y_dim = y_da.dims[0]
+    if obj.indexes[y_dim].is_monotonic_increasing:
+        obj = obj.sel({y_dim: slice(min_y, max_y)})
+    else:
+        obj = obj.sel({y_dim: slice(max_y, min_y)})
+
+    # 4. X-Slicing (Longitude or Projection X)
+    x_dim = x_da.dims[0]
+    if not is_geographic:
+        # Standard slice for projected coordinates
+        if obj.indexes[x_dim].is_monotonic_increasing:
+            obj = obj.sel({x_dim: slice(min_x, max_x)})
+        else:
+            obj = obj.sel({x_dim: slice(max_x, min_x)})
+        return obj
+
+    # 5. Longitude Wrapping Logic
+    # Get grid convention from eager indexes
+    lon_grid = obj.indexes[x_dim]
+    g_min = lon_grid.min()
+
+    # Normalize extent to [g_min, g_min + 360]
+    norm_min_x = (min_x - g_min) % 360 + g_min
+    norm_max_x = (max_x - g_min) % 360 + g_min
+
+    # Detect if we need a wrapped slice
+    if norm_min_x > norm_max_x:
+        # Crosses the grid boundary
+        if lon_grid.is_monotonic_increasing:
+            part1 = obj.sel({x_dim: slice(norm_min_x, g_min + 360)})
+            part2 = obj.sel({x_dim: slice(g_min, norm_max_x)})
+        else:
+            part1 = obj.sel({x_dim: slice(g_min + 360, norm_min_x)})
+            part2 = obj.sel({x_dim: slice(norm_max_x, g_min)})
+
+        # Concatenate parts
+        res = xr.concat([part1, part2], dim=x_dim)
+    else:
+        # Simple non-wrapped slice
+        if lon_grid.is_monotonic_increasing:
+            res = obj.sel({x_dim: slice(norm_min_x, norm_max_x)})
+        else:
+            res = obj.sel({x_dim: slice(norm_max_x, norm_min_x)})
+
+    # Metadata update
+    msg = f"Spatially sliced to extent {extent} (wrapped={norm_min_x > norm_max_x})"
+    update_history(res, msg)
+
+    return res
