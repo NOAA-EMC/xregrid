@@ -12,6 +12,7 @@ from scipy.sparse import coo_matrix
 from xregrid.utils import update_history, get_crs_info
 from xregrid.grid import (
     _get_mesh_info,
+    _get_non_spatial_dims,
     _bounds_to_vertices,
     _get_grid_bounds,
     _create_esmf_grid,
@@ -28,6 +29,11 @@ from xregrid.parallel import (
 if TYPE_CHECKING:
     import dask.distributed
     from scipy.sparse import csr_matrix
+
+try:
+    from dask.base import is_dask_collection
+except ImportError:
+    is_dask_collection = None  # type: ignore
 
 # Global cache for the driver to store distributed futures
 # Keyed by (client_id, weight_key)
@@ -61,7 +67,7 @@ class Regridder:
         Whether the grid is periodic in longitude.
     """
 
-    # Internal state default values (Aero Protocol: Robustness)
+    # Internal state default values
     source_grid_ds: Optional[xr.Dataset] = None
     target_grid_ds: Optional[xr.Dataset] = None
     method: str = "bilinear"
@@ -94,7 +100,7 @@ class Regridder:
         filename: str = "weights.nc",
         skipna: bool = False,
         na_thres: float = 1.0,
-        periodic: bool = False,
+        periodic: Optional[bool] = None,
         mpi: bool = False,
         parallel: bool = False,
         compute: bool = True,
@@ -157,9 +163,12 @@ class Regridder:
         # Initialize ESMF Manager (required for some environments)
         try:
             import esmpy
+        except ImportError:
+            esmpy = None
 
+        if esmpy is not None:
             if mpi:
-                # Use MULTI logkind for MPI parallelization (Aero Protocol)
+                # Use MULTI logkind for MPI parallelization
                 # Some versions of esmpy don't support logkind in Manager constructor
                 try:
                     self._manager = esmpy.Manager(
@@ -169,7 +178,7 @@ class Regridder:
                     self._manager = esmpy.Manager(debug=False)
             else:
                 self._manager = esmpy.Manager(debug=False)
-        except ImportError:
+        else:
             self._manager = None
 
         self.source_grid_ds = source_grid_ds
@@ -179,36 +188,51 @@ class Regridder:
         self.filename = filename
         self.skipna = skipna
         self.na_thres = na_thres
-        self.periodic = periodic
         self.parallel = parallel
+
+        # Auto-detect periodicity if not specified
+        if periodic is None:
+            self.periodic = self._detect_periodicity(source_grid_ds)
+        else:
+            self.periodic = periodic
+
         self.compute_on_init = compute
         self.extrap_method = extrap_method
         self.extrap_dist_exponent = extrap_dist_exponent
 
         # Generate a unique ID for this regridder instance to avoid cache collisions
-        # (Aero Protocol: Robustness against memory ID reuse in Dask clusters)
         import uuid
 
         self._uid = str(uuid.uuid4())
 
-        # Determine coordinate system for consistency (Aero Protocol: Robustness)
-        try:
-            import esmpy
+        # Determine coordinate system for consistency
+        if esmpy is not None:
+            # Detect if the grids are geographic (lat-lon in degrees)
+            src_crs = get_crs_info(source_grid_ds)
+            tgt_crs = get_crs_info(target_grid_ds)
 
-            self._coord_sys = (
-                esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART
-            )
-        except ImportError:
-            self._coord_sys = None
+            # Default to geographic if no CRS found (common for simple lat-lon)
+            is_geographic = True
+            if (src_crs and not src_crs.is_geographic) or (
+                tgt_crs and not tgt_crs.is_geographic
+            ):
+                is_geographic = False
 
-        # Robust coordinate handling: internally sort coordinates to be ascending
-        # to ensure ESMF weight generation is stable and avoid boundary issues.
-        # (Aero Protocol: User doesn't have to worry about monotonicity)
-        self.source_grid_ds, self._src_was_sorted = self._normalize_grid(source_grid_ds)
-        self.target_grid_ds, self._tgt_was_sorted = self._normalize_grid(target_grid_ds)
+            # Determine if we have unstructured grids
+            _, _, _, _, is_unstructured_src = _get_mesh_info(source_grid_ds)
+            _, _, _, _, is_unstructured_tgt = _get_mesh_info(target_grid_ds)
 
-        try:
-            import esmpy
+            # Use SPH_DEG if:
+            # 1. periodic=True
+            # 2. OR it's geographic AND either grid is unstructured (to handle dateline crossing swaths)
+            # Structured non-periodic grids continue using CART by default to maintain
+            # backward compatibility and avoid unwanted wrap-around in regional cases.
+            if periodic or (
+                is_geographic and (is_unstructured_src or is_unstructured_tgt)
+            ):
+                self._coord_sys = esmpy.CoordSys.SPH_DEG
+            else:
+                self._coord_sys = esmpy.CoordSys.CART
 
             self.method_map = {
                 "bilinear": esmpy.RegridMethod.BILINEAR,
@@ -223,9 +247,18 @@ class Regridder:
                 "nearest_idw": esmpy.ExtrapMethod.NEAREST_IDAVG,
                 "creep_fill": esmpy.ExtrapMethod.CREEP_FILL,
             }
-        except ImportError:
+        else:
+            self._coord_sys = None
             self.method_map = {}
             self.extrap_method_map = {}
+
+        # Robust coordinate handling: internally sort coordinates to be ascending
+        # to ensure ESMF weight generation is stable and avoid boundary issues.
+        # We keep a reference to the original grids for restoration.
+        self._orig_source_grid = source_grid_ds
+        self._orig_target_grid = target_grid_ds
+        self.source_grid_ds, self._src_was_sorted = self._normalize_grid(source_grid_ds)
+        self.target_grid_ds, self._tgt_was_sorted = self._normalize_grid(target_grid_ds)
 
         # Internal state
         self._shape_source: Optional[Tuple[int, ...]] = None
@@ -308,10 +341,11 @@ class Regridder:
         """
         was_sorted = False
         try:
-            # Only for rectilinear 1D coordinates
+            # Detect spatial coordinates via cf-xarray
             lat_da = ds.cf["latitude"]
             lon_da = ds.cf["longitude"]
 
+            # Only for rectilinear 1D coordinates
             # Must be 1D and not shared (unstructured grids share dimensions)
             if (
                 lat_da.ndim == 1
@@ -321,21 +355,36 @@ class Regridder:
                 lat_dim = lat_da.dims[0]
                 lon_dim = lon_da.dims[0]
 
-                # Only sort if dimension coordinates are numeric (Aero Protocol: Robustness)
+                # Only sort if dimension coordinates are numeric
                 if np.issubdtype(ds[lat_dim].dtype, np.number) and np.issubdtype(
                     ds[lon_dim].dtype, np.number
                 ):
-                    # Aero Protocol: Use indexes for monotonicity check to remain lazy.
+                    # Use indexes for monotonicity check to remain lazy.
                     # Indexes are always in memory in xarray, so this doesn't trigger
                     # computation of dask-backed coordinates.
                     is_lat_asc = ds.indexes[lat_dim].is_monotonic_increasing
                     is_lon_asc = ds.indexes[lon_dim].is_monotonic_increasing
 
                     if not (is_lat_asc and is_lon_asc):
+                        # Sort to ascending order for ESMF stability
                         ds = ds.sortby([lat_dim, lon_dim])
                         was_sorted = True
         except (KeyError, AttributeError, ValueError):
-            pass
+            # Fallback to projected coordinates if geographic not found
+            try:
+                x_da = ds.cf["projection_x_coordinate"]
+                y_da = ds.cf["projection_y_coordinate"]
+
+                if x_da.ndim == 1 and y_da.ndim == 1 and x_da.dims[0] != y_da.dims[0]:
+                    x_dim, y_dim = x_da.dims[0], y_da.dims[0]
+                    if not (
+                        ds.indexes[x_dim].is_monotonic_increasing
+                        and ds.indexes[y_dim].is_monotonic_increasing
+                    ):
+                        ds = ds.sortby([y_dim, x_dim])
+                        was_sorted = True
+            except (KeyError, AttributeError, ValueError):
+                pass
         return ds, was_sorted
 
     def _validate_weights(self) -> None:
@@ -784,7 +833,7 @@ class Regridder:
 
                     chunk_ds = self.target_grid_ds.isel(sel_dict)
 
-                    # Pass slice info instead of massive array to workers (Aero Protocol: Driver Efficiency)
+                    # Pass slice info instead of massive array to workers
                     dest_slice_info = (i0_start, i0_end, i1_start, i1_end, size1)
 
                     future = client.submit(
@@ -845,7 +894,7 @@ class Regridder:
         n_src = int(np.prod(self._shape_source))
         n_dst = int(np.prod(self._shape_target))
 
-        # Perform concatenation on a worker to protect driver memory (Aero Protocol)
+        # Perform concatenation on a worker to protect driver memory
         # We use top-level task functions to avoid capturing 'self' and mocks.
         self._weights_matrix = self._dask_client.submit(
             _assemble_weights_task, self._dask_futures, n_src, n_dst
@@ -1007,7 +1056,7 @@ class Regridder:
             raise RuntimeError("Weights have not been generated yet.")
 
         if hasattr(self._weights_matrix, "key"):
-            # Aero Protocol: Distributed lazy diagnostics
+            # Distributed lazy diagnostics
             import dask.array as da
             import dask.distributed
 
@@ -1047,7 +1096,7 @@ class Regridder:
 
         dims_target = self._dims_target
         if dims_target is None:
-            # Fallback for mock objects without full initialization (Aero Protocol: Robustness)
+            # Fallback for mock objects without full initialization
             if self._shape_target is not None:
                 dims_target = tuple(f"dim_{i}" for i in range(len(self._shape_target)))
             else:
@@ -1061,7 +1110,7 @@ class Regridder:
             coords=coords,
         )
 
-        # Propagate CRS metadata (Aero Protocol: No Ambiguous Plots)
+        # Propagate CRS metadata
         target_crs_obj = get_crs_info(self.target_grid_ds)
         if target_crs_obj:
             ds.attrs["crs"] = target_crs_obj.to_wkt()
@@ -1099,26 +1148,34 @@ class Regridder:
         if self._weights_matrix is None:
             raise RuntimeError("Weights have not been generated yet.")
 
-        # Aero Protocol: Distributed metrics.
+        # Distributed metrics.
         # Compute metrics on the cluster if weights are remote to avoid driver OOM.
         is_remote = hasattr(self._weights_matrix, "key")
 
         n_src = int(np.prod(self._shape_source))
         n_dst = int(np.prod(self._shape_target))
 
-        n_weights = -1
+        n_weights: Any = -1
         if is_remote:
             if not skip_heavy:
-                # Compute nnz on cluster (Aero Protocol: Optimized Distributed Metrics)
+                # Compute nnz on cluster
                 try:
+                    import dask.array as da
                     import dask.distributed
 
                     client = self._dask_client or dask.distributed.get_client()
                     n_weights_future = client.submit(
                         _get_nnz_task, self._weights_matrix
                     )
-                    # We wait for the scalar result (Aero Protocol: Expected block for reports)
-                    n_weights = int(n_weights_future.result())
+
+                    if format == "dataset":
+                        # Preserve laziness for dataset output
+                        n_weights = da.from_delayed(
+                            dask.delayed(n_weights_future), shape=(), dtype=int
+                        )
+                    else:
+                        # For dict, we still need to wait to satisfy return type
+                        n_weights = int(n_weights_future.result())
                 except (ImportError, ValueError, AttributeError):
                     n_weights = -1
             else:
@@ -1127,7 +1184,7 @@ class Regridder:
         else:
             n_weights = int(self._weights_matrix.nnz)
 
-        report = {
+        report: dict[str, Any] = {
             "n_src": n_src,
             "n_dst": n_dst,
             "n_weights": n_weights,
@@ -1140,27 +1197,57 @@ class Regridder:
             weights_sum = ds_diag.weight_sum
             unmapped_mask = ds_diag.unmapped_mask
 
-            unmapped_count = int(unmapped_mask.sum())
+            unmapped_count = unmapped_mask.sum()
+            unmapped_fraction = unmapped_count / n_dst
 
-            report.update(
-                {
-                    "unmapped_count": unmapped_count,
-                    "unmapped_fraction": float(unmapped_count / n_dst),
-                    "weight_sum_min": float(weights_sum.where(unmapped_mask == 0).min())
-                    if unmapped_count < n_dst
-                    else 0.0,
-                    "weight_sum_max": float(weights_sum.max()),
-                    "weight_sum_mean": float(weights_sum.mean()),
-                }
-            )
+            # Handle min only where mapped to avoid NaN-related issues in min()
+            weight_sum_min = weights_sum.where(unmapped_mask == 0).min()
+            weight_sum_max = weights_sum.max()
+            weight_sum_mean = weights_sum.mean()
+
+            if format == "dict":
+                # Convert to eager values for dict format
+                report.update(
+                    {
+                        "unmapped_count": int(unmapped_count),
+                        "unmapped_fraction": float(unmapped_fraction),
+                        "weight_sum_min": float(weight_sum_min)
+                        if int(unmapped_count) < n_dst
+                        else 0.0,
+                        "weight_sum_max": float(weight_sum_max),
+                        "weight_sum_mean": float(weight_sum_mean),
+                    }
+                )
+            else:
+                # Keep as DataArrays for dataset format
+                report.update(
+                    {
+                        "unmapped_count": unmapped_count,
+                        "unmapped_fraction": unmapped_fraction,
+                        "weight_sum_min": weight_sum_min,
+                        "weight_sum_max": weight_sum_max,
+                        "weight_sum_mean": weight_sum_mean,
+                    }
+                )
 
         if format == "dataset":
+            # For Dataset output, ensure all metrics are properly handled as variables
+            ds_vars = {}
+            for k, v in report.items():
+                if isinstance(v, (str, bool)):
+                    continue
+
+                if isinstance(v, xr.DataArray):
+                    # Variable is already a DataArray
+                    da = v.copy()
+                    da.attrs["description"] = f"Quality metric: {k}"
+                    ds_vars[k] = da
+                else:
+                    # Variable is a scalar or raw array (e.g. Dask array)
+                    ds_vars[k] = ([], v, {"description": f"Quality metric: {k}"})
+
             ds_report = xr.Dataset(
-                data_vars={
-                    k: ([], v, {"description": f"Quality metric: {k}"})
-                    for k, v in report.items()
-                    if isinstance(v, (int, float)) or np.issubdtype(type(v), np.number)
-                },
+                data_vars=ds_vars,
                 attrs={
                     "method": self.method,
                     "periodic": int(self.periodic),
@@ -1215,7 +1302,7 @@ class Regridder:
         quality_str = "quality=deferred"
         n_dst = int(np.prod(self._shape_target)) if self._shape_target else 0
 
-        # Aero Protocol: Avoid remote calls and expensive reports in __repr__
+        # Avoid remote calls and expensive reports in __repr__
         is_remote = hasattr(self._weights_matrix, "key")
         if is_remote:
             quality_str = "quality=lazy"
@@ -1238,16 +1325,22 @@ class Regridder:
             f"{quality_str})"
         )
 
-    def plot_weights(self, row_idx: int, **kwargs: Any) -> Any:
+    def plot_weights(self, row_idx: int, mode: str = "static", **kwargs: Any) -> Any:
         """
-        Track A: Visualize source points contributing to a specific destination point.
+        Visualize source points contributing to a specific destination point.
+
+        Two-Track Rule:
+        - mode='static' (Track A): Publication-quality plot using Matplotlib/Cartopy.
+        - mode='interactive' (Track B): Exploratory plot using HvPlot/HoloViews.
 
         Parameters
         ----------
         row_idx : int
             The index of the destination point (0-based).
+        mode : str, default 'static'
+            The plotting mode: 'static' or 'interactive'.
         **kwargs : Any
-            Additional arguments passed to plot_static.
+            Additional arguments passed to the plotting functions.
 
         Returns
         -------
@@ -1256,13 +1349,58 @@ class Regridder:
         """
         from .viz import plot_weights as _plot_weights
 
-        return _plot_weights(self, row_idx, **kwargs)
+        return _plot_weights(self, row_idx, mode=mode, **kwargs)
+
+    def plot_comparison(
+        self,
+        da_src: xr.DataArray,
+        da_tgt: xr.DataArray,
+        mode: str = "static",
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Unified comparison plot (Source, Target, Difference).
+
+        Two-Track Rule:
+        - mode='static' (Track A): Publication-quality plot using Matplotlib/Cartopy.
+        - mode='interactive' (Track B): Exploratory plot using HvPlot/HoloViews.
+
+        Parameters
+        ----------
+        da_src : xr.DataArray
+            The source DataArray.
+        da_tgt : xr.DataArray
+            The target (regridded) DataArray.
+        mode : str, default 'static'
+            The plotting mode: 'static' or 'interactive'.
+        **kwargs : Any
+            Additional arguments passed to the plotting functions.
+
+        Returns
+        -------
+        Any
+            The plot object.
+        """
+        from .viz import plot_comparison as _plot_static
+        from .viz import plot_comparison_interactive as _plot_interactive
+
+        if mode == "static":
+            return _plot_static(da_src, da_tgt, regridder=self, **kwargs)
+        elif mode == "interactive":
+            rasterize = kwargs.pop("rasterize", True)
+            return _plot_interactive(
+                da_src, da_tgt, regridder=self, rasterize=rasterize, **kwargs
+            )
+        else:
+            raise ValueError(
+                f"Unknown plotting mode: '{mode}'. Must be 'static' or 'interactive'."
+            )
 
     def plot_diagnostics(self, mode: str = "static", **kwargs: Any) -> Any:
         """
         Visualize spatial diagnostics of the regridding weights.
 
-        Follows the Aero Protocol's Two-Track Rule:
+        Two-Track Rule:
         - mode='static' (Track A): Publication-quality plot using Matplotlib/Cartopy.
         - mode='interactive' (Track B): Exploratory plot using HvPlot/HoloViews.
 
@@ -1324,19 +1462,8 @@ class Regridder:
         if na_thres is None:
             na_thres = self.na_thres
 
-        # Gather weights if input is eager (NumPy) but weights are lazy (Dask Future)
-        # (Aero Protocol: Flexibility)
-        is_lazy_input = False
-        if isinstance(obj, xr.DataArray):
-            is_lazy_input = hasattr(obj.data, "dask")
-        elif isinstance(obj, xr.Dataset):
-            # Check if any data variable is dask-backed
-            is_lazy_input = any(hasattr(v.data, "dask") for v in obj.data_vars.values())
-
-        if not is_lazy_input and hasattr(self._weights_matrix, "key"):
-            self._weights_matrix = self._dask_client.gather(self._weights_matrix)
-            if hasattr(self._total_weights, "key"):
-                self._total_weights = self._dask_client.gather(self._total_weights)
+        # Aero Protocol: Weight dispatch is now handled per-variable in _regrid_dataarray
+        # to robustly support mixed-backend (NumPy/Dask) Datasets.
 
         if isinstance(obj, xr.Dataset):
             # Sort input object if source grid was normalized
@@ -1345,15 +1472,33 @@ class Regridder:
             res = self._regrid_dataset(obj, skipna=skipna, na_thres=na_thres)
             # Restore original target coordinate order if it was sorted
             if self._tgt_was_sorted:
-                # Use sel to restore order without full reindexing if possible
-                res = res.sel({d: self.target_grid_ds[d] for d in self._dims_target})
+                # Use sel to restore order from the original target grid
+                res = res.sel({d: self._orig_target_grid[d] for d in self._dims_target})
             return res
         elif isinstance(obj, xr.DataArray):
+            # Check if DataArray is regriddable
+            is_regriddable = all(dim in obj.dims for dim in self._dims_source)
+            if not is_regriddable:
+                try:
+                    # Check for logical spatial dimensions
+                    spatial_dims = set(obj.cf["latitude"].dims) | set(
+                        obj.cf["longitude"].dims
+                    )
+                    if spatial_dims.issubset(set(obj.dims)):
+                        is_regriddable = True
+                except (KeyError, AttributeError):
+                    pass
+
+            if not is_regriddable:
+                # Not a spatial DataArray or missing spatial dimensions, return as is
+                return obj
+
             if self._src_was_sorted:
                 obj = obj.sortby([self._dims_source[0], self._dims_source[1]])
             res = self._regrid_dataarray(obj, skipna=skipna, na_thres=na_thres)
             if self._tgt_was_sorted:
-                res = res.sel({d: self.target_grid_ds[d] for d in self._dims_target})
+                # Use sel to restore order from the original target grid
+                res = res.sel({d: self._orig_target_grid[d] for d in self._dims_target})
             return res
         # Handle uxarray objects if they don't pass isinstance(xr.Dataset)
         elif hasattr(obj, "uxgrid"):
@@ -1401,6 +1546,21 @@ class Regridder:
         if na_thres is None:
             na_thres = self.na_thres
 
+        # Backend-agnostic Dask detection
+        is_lazy = False
+        if is_dask_collection:
+            is_lazy = is_dask_collection(da_in.data)
+        else:
+            is_lazy = hasattr(da_in.data, "dask")
+
+        # Just-in-Time weight gathering for mixed-backend support.
+        # If the input is eager (NumPy) but weights are still remote Futures,
+        # we must gather them to the driver for local application.
+        if not is_lazy and hasattr(self._weights_matrix, "key"):
+            self._weights_matrix = self._dask_client.gather(self._weights_matrix)
+            if hasattr(self._total_weights, "key"):
+                self._total_weights = self._dask_client.gather(self._total_weights)
+
         # If skipna is True, we need _total_weights.
         # If it was not computed during init, compute it now.
         if skipna and self._total_weights is None and self._weights_matrix is not None:
@@ -1415,18 +1575,25 @@ class Regridder:
                     self._weights_matrix.sum(axis=1)
                 ).flatten()
 
-        # Identify auxiliary coordinates that need regridding (Aero Protocol: Scientific Hygiene)
+        # Identify auxiliary coordinates that need regridding
         aux_coords_to_regrid = {}
 
-        # Track this DataArray to prevent mutual recursion (Aero Protocol: Robustness)
+        # Track this DataArray to prevent mutual recursion
         # Using both ID and name for maximum safety
         _processed_ids.add(id(da_in))
         if da_in.name is not None:
             _processed_ids.add(str(da_in.name))
 
+        # Identify non-spatial variables to exclude from regridding
+        non_spatial_dims = _get_non_spatial_dims(da_in)
+
         for c_name, c_da in da_in.coords.items():
             # Avoid infinite recursion
             if id(c_da) in _processed_ids or c_name in _processed_ids:
+                continue
+
+            # Skip if coordinate itself is a non-spatial coordinate
+            if c_name in non_spatial_dims:
                 continue
 
             if c_name not in da_in.dims and all(
@@ -1442,7 +1609,6 @@ class Regridder:
                 )
 
         # CF-Awareness: Map logical dimensions to physical dimension names in da_in
-        # (Aero Protocol: Flexibility)
 
         input_core_dims = list(self._dims_source)
 
@@ -1497,8 +1663,8 @@ class Regridder:
         weights_key_arg = None
 
         # Optimization: Use worker-local cache for weights and total_weights to avoid
-        # serialization overhead when using Dask. (Aero Protocol: Dask Efficiency)
-        if hasattr(da_in.data, "dask"):
+        # serialization overhead when using Dask.
+        if is_lazy:
             client = self._dask_client
             if client is None:
                 try:
@@ -1513,14 +1679,12 @@ class Regridder:
                 if hasattr(self._weights_matrix, "key"):
                     weights_key_arg = f"weights_{self._weights_matrix.key}"
                 else:
-                    # Use unique instance ID instead of id(self._weights_matrix)
-                    # to prevent collisions when memory IDs are reused across tests.
                     weights_key_arg = f"weights_{self._uid}"
 
                 # Use client ID to ensure cache is valid for current cluster
                 client_id = getattr(client, "id", id(client))
 
-                # Ensure weights are in worker-local cache (Aero Protocol: Efficiency)
+                # Ensure weights are in worker-local cache
                 if (client_id, weights_key_arg) not in _DRIVER_CACHE:
                     if hasattr(self._weights_matrix, "key"):
                         # Truly Distributed: matrix is already a Future on the cluster.
@@ -1596,40 +1760,87 @@ class Regridder:
         out.encoding.update(da_in.encoding)
 
         # Assign coordinates from target grid (including scalar coords like grid_mapping)
-        # (Aero Protocol: Scientific Hygiene)
         target_coords_to_assign = {}
         target_gm_name = None
+        target_mesh_name = None
 
+        # 1. First Pass: Identify topology and grid mapping from target grid
+        for v in list(self.target_grid_ds.coords) + list(self.target_grid_ds.data_vars):
+            var_obj = self.target_grid_ds[v]
+            if "grid_mapping_name" in var_obj.attrs:
+                target_gm_name = v
+            if var_obj.attrs.get("cf_role") == "mesh_topology":
+                target_mesh_name = v
+
+        # 2. Second Pass: Assign relevant coordinates to output
         for c in self.target_grid_ds.coords:
-            # Include coordinates that match target dimensions OR are scalar
-            if set(self.target_grid_ds.coords[c].dims).issubset(set(self._dims_target)):
+            # Include coordinates that match target dimensions OR are scalar/mapping
+            # Aero Protocol: Ensure assigned coordinates are dimensionally compatible with the output
+            c_dims = set(self.target_grid_ds.coords[c].dims)
+            out_dims = set(out.dims)
+            if (
+                c_dims.issubset(set(self._dims_target))
+                or c in [target_gm_name, target_mesh_name]
+            ) and c_dims.issubset(out_dims):
                 target_coords_to_assign[c] = self.target_grid_ds.coords[c]
-                # Identify if this is a grid_mapping coordinate
-                if "grid_mapping_name" in self.target_grid_ds.coords[c].attrs:
-                    target_gm_name = c
 
-        # Also check data_vars in target_grid_ds for grid_mapping variables
-        if target_gm_name is None:
-            for v in self.target_grid_ds.data_vars:
-                if "grid_mapping_name" in self.target_grid_ds[v].attrs:
-                    target_gm_name = v
+        # Also check data_vars for topology/mapping that might be needed as coords
+        for v in [target_gm_name, target_mesh_name]:
+            if v and v in self.target_grid_ds.data_vars:
+                v_dims = set(self.target_grid_ds[v].dims)
+                if v_dims.issubset(set(out.dims)):
                     target_coords_to_assign[v] = self.target_grid_ds[v]
+
+        # Ensure all variables referenced by the mesh topology are also included
+        if target_mesh_name:
+            topology_attrs = self.target_grid_ds[target_mesh_name].attrs
+            for attr in [
+                "face_node_connectivity",
+                "edge_node_connectivity",
+                "face_face_connectivity",
+                "face_edge_connectivity",
+                "edge_face_connectivity",
+                "node_coordinates",
+                "face_coordinates",
+                "edge_coordinates",
+            ]:
+                if attr in topology_attrs:
+                    ref_vars = topology_attrs[attr].split()
+                    for rv in ref_vars:
+                        if (
+                            rv in self.target_grid_ds
+                            and rv not in target_coords_to_assign
+                        ):
+                            rv_dims = set(self.target_grid_ds[rv].dims)
+                            if rv_dims.issubset(set(out.dims)):
+                                target_coords_to_assign[rv] = self.target_grid_ds[rv]
 
         out = out.assign_coords(target_coords_to_assign)
 
-        # Update grid_mapping attribute (Aero Protocol: Scientific Hygiene)
+        # Update grid_mapping and mesh attributes
         if target_gm_name:
             out.attrs["grid_mapping"] = target_gm_name
             if "grid_mapping" in out.encoding:
                 out.encoding["grid_mapping"] = target_gm_name
         else:
-            # If target has no grid mapping, remove source one as it's no longer valid for this grid
-            if "grid_mapping" in out.attrs:
-                del out.attrs["grid_mapping"]
-            if "grid_mapping" in out.encoding:
-                del out.encoding["grid_mapping"]
+            # Remove stale source grid_mapping
+            out.attrs.pop("grid_mapping", None)
+            out.encoding.pop("grid_mapping", None)
 
-        # Propagate CRS metadata (Aero Protocol: Scientific Hygiene)
+        if target_mesh_name:
+            out.attrs["mesh"] = target_mesh_name
+            # Determine location based on target dims
+            # This is a simplification; we assume it's face/element if conservative, node otherwise.
+            if self.method == "conservative":
+                out.attrs["location"] = "face"
+            else:
+                out.attrs["location"] = "node"
+        else:
+            # Remove stale source UGRID attributes
+            out.attrs.pop("mesh", None)
+            out.attrs.pop("location", None)
+
+        # Propagate CRS metadata
         target_crs_obj = get_crs_info(self.target_grid_ds)
         if target_crs_obj:
             out.attrs["crs"] = target_crs_obj.to_wkt()
@@ -1667,6 +1878,56 @@ class Regridder:
 
         return out
 
+    def _detect_periodicity(self, ds: xr.Dataset) -> bool:
+        """
+        Heuristically detect if a grid is periodic in longitude.
+
+        Checks if the longitude range is approximately 360 degrees.
+        Prioritizes metadata and eager values to avoid hidden Dask computes.
+
+        Parameters
+        ----------
+        ds : xr.Dataset
+            The grid dataset to check.
+
+        Returns
+        -------
+        bool
+            True if the grid is detected as periodic.
+        """
+        try:
+            from xregrid.utils import _find_coord
+
+            lon = _find_coord(ds, "longitude")
+            if lon is not None:
+                # 1. Check metadata
+                if lon.attrs.get("boundary") == "periodic":
+                    return True
+
+                # 2. Check eager values (dimension coordinates are eager in xarray)
+                if not hasattr(lon.data, "dask"):
+                    lon_min = float(lon.min())
+                    lon_max = float(lon.max())
+                    extent = lon_max - lon_min
+                    # ESMF periodic grids must have extent strictly less than 360
+                    # because the periodicity is handled by connecting the last point to the first.
+                    # If extent is 360, the last point is a duplicate of the first and ESMF will fail.
+                    # Use a tighter bound (354 degrees) to avoid false positives for regional swaths.
+                    if 354.0 <= extent < 360.0:
+                        return True
+
+                # 3. Last fallback: Check dimension name
+                if "lon" in lon.dims or "longitude" in lon.dims:
+                    # If it's a global grid from a known generator, it might have attributes
+                    if (
+                        ds.attrs.get("history")
+                        and "global grid" in ds.attrs.get("history", "").lower()
+                    ):
+                        return True
+        except Exception:
+            pass
+        return False
+
     def _regrid_dataset(
         self,
         ds_in: xr.Dataset,
@@ -1697,9 +1958,29 @@ class Regridder:
 
         regridded_items: dict[str, Union[xr.DataArray, Any]] = {}
 
+        # Identify non-spatial variables to exclude from regridding
+        non_spatial_dims = _get_non_spatial_dims(ds_in)
+
         # 1. Regrid data variables
         for name, da in ds_in.data_vars.items():
-            # CF-Awareness: Check for spatial dimensions using logical axes (Aero Protocol)
+            # Skip if variable itself is a non-spatial coordinate/dimension
+            if name in non_spatial_dims:
+                regridded_items[name] = da
+                continue
+
+            # Skip UGRID topology/connectivity variables
+            if da.attrs.get("cf_role") in [
+                "mesh_topology",
+                "face_node_connectivity",
+                "edge_node_connectivity",
+                "face_face_connectivity",
+                "face_edge_connectivity",
+                "edge_face_connectivity",
+            ]:
+                regridded_items[name] = da
+                continue
+
+            # CF-Awareness: Check for spatial dimensions using logical axes
             is_regriddable = False
             if all(dim in da.dims for dim in self._dims_source):
                 is_regriddable = True
@@ -1729,10 +2010,15 @@ class Regridder:
 
         out = xr.Dataset(regridded_items, attrs=ds_in.attrs)
 
-        # 2. Scientific Hygiene: Regrid auxiliary spatial coordinates and preserve others (Aero Protocol)
+        # 2. Scientific Hygiene: Regrid auxiliary spatial coordinates and preserve others
         # and ensure grid_mapping from target grid is attached.
         for c in ds_in.coords:
             if c in out.coords:
+                continue
+
+            # Skip if coordinate itself is a non-spatial coordinate
+            if c in non_spatial_dims:
+                out = out.assign_coords({c: ds_in.coords[c]})
                 continue
 
             # Check if this coordinate depends on spatial dimensions
@@ -1754,28 +2040,48 @@ class Regridder:
                 # Not dependent on spatial dims, just preserve it
                 out = out.assign_coords({c: ds_in.coords[c]})
 
-        # 3. Handle grid_mapping and scalar coordinates from target grid (Aero Protocol)
+        # 3. Handle grid_mapping and scalar coordinates from target grid
         target_gm_name = None
+        target_mesh_name = None
+
+        # Identify topology and grid mapping from target grid
+        for v in list(self.target_grid_ds.coords) + list(self.target_grid_ds.data_vars):
+            var_obj = self.target_grid_ds[v]
+            if "grid_mapping_name" in var_obj.attrs:
+                target_gm_name = v
+            if var_obj.attrs.get("cf_role") == "mesh_topology":
+                target_mesh_name = v
+
         for c in self.target_grid_ds.coords:
             if c not in out.coords:
                 if set(self.target_grid_ds.coords[c].dims).issubset(
                     set(self._dims_target)
-                ):
-                    out = out.assign_coords({c: self.target_grid_ds.coords[c]})
+                ) or c in [target_gm_name, target_mesh_name]:
+                    out = out.assign_coords({c: self.target_grid_ds[c]})
 
-            # Identify target grid mapping variable
-            if "grid_mapping_name" in self.target_grid_ds.coords[c].attrs:
-                target_gm_name = c
+        # Ensure mapping/topology vars from data_vars are also attached if needed
+        for v in [target_gm_name, target_mesh_name]:
+            if v and v in self.target_grid_ds.data_vars and v not in out.coords:
+                out = out.assign_coords({v: self.target_grid_ds[v]})
 
-        # Also check target data_vars for grid_mapping
-        if target_gm_name is None:
-            for v in self.target_grid_ds.data_vars:
-                if "grid_mapping_name" in self.target_grid_ds[v].attrs:
-                    target_gm_name = v
-                    if target_gm_name not in out.coords:
-                        out = out.assign_coords(
-                            {target_gm_name: self.target_grid_ds[v]}
-                        )
+        # Ensure all variables referenced by the mesh topology are also included
+        if target_mesh_name:
+            topology_attrs = self.target_grid_ds[target_mesh_name].attrs
+            for attr in [
+                "face_node_connectivity",
+                "edge_node_connectivity",
+                "face_face_connectivity",
+                "face_edge_connectivity",
+                "edge_face_connectivity",
+                "node_coordinates",
+                "face_coordinates",
+                "edge_coordinates",
+            ]:
+                if attr in topology_attrs:
+                    ref_vars = topology_attrs[attr].split()
+                    for rv in ref_vars:
+                        if rv in self.target_grid_ds and rv not in out:
+                            out = out.assign_coords({rv: self.target_grid_ds[rv]})
 
         # Update global grid_mapping attribute if it exists
         if target_gm_name:
@@ -1783,10 +2089,9 @@ class Regridder:
                 out.attrs["grid_mapping"] = target_gm_name
         else:
             # Remove invalid grid_mapping
-            if "grid_mapping" in out.attrs:
-                del out.attrs["grid_mapping"]
+            out.attrs.pop("grid_mapping", None)
 
-        # Propagate CRS metadata (Aero Protocol: Scientific Hygiene)
+        # Propagate CRS metadata
         target_crs_obj = get_crs_info(self.target_grid_ds)
         if target_crs_obj:
             out.attrs["crs"] = target_crs_obj.to_wkt()

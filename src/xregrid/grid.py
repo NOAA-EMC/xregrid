@@ -6,6 +6,65 @@ import cf_xarray  # noqa: F401
 import numpy as np
 import xarray as xr
 
+from .utils import _find_coord
+
+
+def _get_non_spatial_dims(ds: xr.Dataset) -> set[str]:
+    """
+    Identify dimensions that are likely not spatial (Time, Vertical).
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The dataset to inspect.
+
+    Returns
+    -------
+    set of str
+        Names of non-spatial dimensions.
+    """
+    non_spatial_dims = set()
+
+    # 1. Use cf-xarray axes
+    try:
+        # Time axis
+        if "T" in ds.cf.axes:
+            non_spatial_dims.update(ds.cf.axes["T"])
+        # Vertical axis
+        if "Z" in ds.cf.axes:
+            non_spatial_dims.update(ds.cf.axes["Z"])
+    except (KeyError, AttributeError):
+        pass
+
+    # 2. Heuristics based on dimension names
+    time_names = ["time", "t", "tden", "time_counter", "t_step"]
+    vert_names = [
+        "lev",
+        "level",
+        "depth",
+        "pressure",
+        "sigma",
+        "pres",
+        "height",
+        "altitude",
+        "z",
+    ]
+
+    for dim in ds.dims:
+        dim_lower = str(dim).lower()
+        if dim_lower in time_names or dim_lower in vert_names:
+            non_spatial_dims.add(str(dim))
+
+        # 3. Dtype check for time if it's a coordinate
+        if dim in ds.coords:
+            dtype = ds[dim].dtype
+            if np.issubdtype(dtype, np.datetime64) or np.issubdtype(
+                dtype, np.timedelta64
+            ):
+                non_spatial_dims.add(str(dim))
+
+    return non_spatial_dims
+
 
 def _get_mesh_info(
     ds: xr.Dataset,
@@ -38,6 +97,10 @@ def _get_mesh_info(
     ValueError
         If coordinates have invalid dimensionality.
     """
+    # Identify and filter out non-spatial dimensions (Time, Z)
+    #
+    non_spatial_dims = _get_non_spatial_dims(ds)
+
     # Handle uxarray objects
     if hasattr(ds, "uxgrid"):
         uxgrid = getattr(ds, "uxgrid")
@@ -63,20 +126,30 @@ def _get_mesh_info(
 
             # If they share same dim, it's unstructured
             if lat.dims == lon.dims:
+                # Apply filtering before returning
+                lat_isel = {d: 0 for d in non_spatial_dims if d in lat.dims}
+                lon_isel = {d: 0 for d in non_spatial_dims if d in lon.dims}
+                if lat_isel:
+                    lat = lat.isel(lat_isel, drop=True)
+                if lon_isel:
+                    lon = lon.isel(lon_isel, drop=True)
                 return lon, lat, lat.shape, lat.dims, True
         except (AttributeError, KeyError):
             pass
 
-    try:
-        lat = ds.cf["latitude"]
-        lon = ds.cf["longitude"]
-    except (KeyError, AttributeError):
+    lat = _find_coord(ds, "latitude")
+    lon = _find_coord(ds, "longitude")
+
+    if lat is None or lon is None:
         if "lat" in ds and "lon" in ds:
             lat = ds["lat"]
             lon = ds["lon"]
         elif "latCell" in ds and "lonCell" in ds:
             lat = ds["latCell"]
             lon = ds["lonCell"]
+        elif "lat_face" in ds and "lon_face" in ds:
+            lat = ds["lat_face"]
+            lon = ds["lon_face"]
         elif "lat_node" in ds and "lon_node" in ds:
             lat = ds["lat_node"]
             lon = ds["lon_node"]
@@ -90,14 +163,34 @@ def _get_mesh_info(
                 "'lat_node'/'lon_node', or have CF attributes."
             )
 
+    # Filter out non-spatial dimensions if they are present in lat/lon
+    lat_isel = {d: 0 for d in non_spatial_dims if d in lat.dims}
+    lon_isel = {d: 0 for d in non_spatial_dims if d in lon.dims}
+    if lat_isel:
+        lat = lat.isel(lat_isel, drop=True)
+    if lon_isel:
+        lon = lon.isel(lon_isel, drop=True)
+
+    # UGRID: Check for 'mesh' and 'location' attributes or topology to confirm unstructured
+    is_ugrid = False
+    if "mesh" in lat.attrs and "location" in lat.attrs:
+        is_ugrid = True
+    elif "mesh" in lon.attrs and "location" in lon.attrs:
+        is_ugrid = True
+    else:
+        for var in ds.variables:
+            if ds[var].attrs.get("cf_role") == "mesh_topology":
+                is_ugrid = True
+                break
+
     if lat.ndim == 2:
         # Curvilinear
         if lon.ndim == 2 and lon.dims != lat.dims and set(lon.dims) == set(lat.dims):
             lon = lon.transpose(*lat.dims)
         return lon, lat, lat.shape, lat.dims, False
     elif lat.ndim == 1:
-        if lat.dims == lon.dims:
-            # Unstructured (e.g. MPAS)
+        if lat.dims == lon.dims or is_ugrid:
+            # Unstructured (e.g. MPAS or UGRID)
             return lon, lat, lat.shape, lat.dims, True
         else:
             # Rectilinear
@@ -125,7 +218,7 @@ def _bounds_to_vertices(b: xr.DataArray) -> Union[xr.DataArray, np.ndarray]:
     Convert cell boundary coordinates (bounds) to vertex coordinates for ESMF.
 
     Supports both 1D and 2D bounds, and 3D curvilinear bounds.
-    Backend-agnostic (Aero Protocol): stays lazy if input is a Dask array.
+    Backend-agnostic : stays lazy if input is a Dask array.
 
     Parameters
     ----------
@@ -191,9 +284,20 @@ def _get_grid_bounds(
     lon_b : np.ndarray or None
         Longitude boundary coordinates.
     """
+    non_spatial_dims = _get_non_spatial_dims(ds)
     try:
         lat_b_da = ds.cf.get_bounds("latitude")
         lon_b_da = ds.cf.get_bounds("longitude")
+
+        # Filter out non-spatial dimensions
+        for da in [lat_b_da, lon_b_da]:
+            isel_dict = {d: 0 for d in non_spatial_dims if d in da.dims}
+            if isel_dict:
+                if da is lat_b_da:
+                    lat_b_da = lat_b_da.isel(isel_dict, drop=True)
+                elif da is lon_b_da:
+                    lon_b_da = lon_b_da.isel(isel_dict, drop=True)
+
         return _bounds_to_vertices(lat_b_da), _bounds_to_vertices(lon_b_da)
     except (KeyError, AttributeError, ValueError):
         if "lat_b" in ds and "lon_b" in ds:
@@ -301,6 +405,8 @@ def _get_unstructured_mesh_info(
     """
     import esmpy
 
+    non_spatial_dims = _get_non_spatial_dims(ds)
+
     # 0. Detect uxarray
     if hasattr(ds, "uxgrid"):
         uxgrid = getattr(ds, "uxgrid")
@@ -318,7 +424,7 @@ def _get_unstructured_mesh_info(
             element_ids = []
             orig_cell_index = []
 
-            # Vectorized triangulation (Aero Protocol: Performance)
+            # Vectorized triangulation
             n_cells, max_edges = conn_raw.shape
             n_edges = np.sum(conn_raw != fill_value, axis=1)
             max_tris = max_edges - 2
@@ -351,9 +457,24 @@ def _get_unstructured_mesh_info(
 
     # 1. Detect MPAS
     if "verticesOnCell" in ds and "latVertex" in ds and "lonVertex" in ds:
-        node_lat = _clip_latitudes(_to_degrees(ds["latVertex"])).values
-        node_lon = _normalize_longitudes(_to_degrees(ds["lonVertex"])).values
-        conn_raw = ds["verticesOnCell"].values
+        v_lat = ds["latVertex"]
+        v_lon = ds["lonVertex"]
+        v_conn = ds["verticesOnCell"]
+
+        # Filter out non-spatial dimensions
+        for da in [v_lat, v_lon, v_conn]:
+            isel_dict = {d: 0 for d in non_spatial_dims if d in da.dims}
+            if isel_dict:
+                if da is v_lat:
+                    v_lat = v_lat.isel(isel_dict, drop=True)
+                elif da is v_lon:
+                    v_lon = v_lon.isel(isel_dict, drop=True)
+                elif da is v_conn:
+                    v_conn = v_conn.isel(isel_dict, drop=True)
+
+        node_lat = _clip_latitudes(_to_degrees(v_lat)).values
+        node_lon = _normalize_longitudes(_to_degrees(v_lon)).values
+        conn_raw = v_conn.values
         n_edges = (
             ds["nEdgesOnCell"].values
             if "nEdgesOnCell" in ds
@@ -365,7 +486,7 @@ def _get_unstructured_mesh_info(
         element_ids = []
         orig_cell_index = []
 
-        # Vectorized triangulation for MPAS (Aero Protocol: Performance)
+        # Vectorized triangulation for MPAS
         # MPAS is 1-based indexing for vertex IDs
         n_cells, max_edges = conn_raw.shape
         max_tris = max_edges - 2
@@ -393,24 +514,33 @@ def _get_unstructured_mesh_info(
             orig_cell_index.astype(np.int32),
         )
 
-    # 2. Detect UGRID
-    # Look for face_node_connectivity
-    conn_var = None
-    for var in ds.data_vars:
-        if ds[var].attrs.get("cf_role") == "face_node_connectivity":
-            conn_var = var
+    # 2. Detect UGRID (Standard Compliance)
+    mesh_var = None
+    for var in ds.variables:
+        if ds[var].attrs.get("cf_role") == "mesh_topology":
+            mesh_var = var
             break
 
+    conn_var = None
+    if mesh_var:
+        conn_var = ds[mesh_var].attrs.get("face_node_connectivity")
+
     if not conn_var:
-        # Fallback to standard names
-        if "face_node_connectivity" in ds:
-            conn_var = "face_node_connectivity"
+        # Fallback: Look for face_node_connectivity role directly
+        for var in ds.variables:
+            if ds[var].attrs.get("cf_role") == "face_node_connectivity":
+                conn_var = var
+                break
+
+    if not conn_var and "face_node_connectivity" in ds:
+        conn_var = "face_node_connectivity"
 
     if conn_var:
-        mesh_name = ds[conn_var].attrs.get("mesh", "")
-        # Try to find node coordinates
+        mesh_name = mesh_var or ds[conn_var].attrs.get("mesh", "")
+
         node_lon_var = None
         node_lat_var = None
+
         if mesh_name and mesh_name in ds:
             node_coords_attr = ds[mesh_name].attrs.get("node_coordinates", "").split()
             if len(node_coords_attr) >= 2:
@@ -418,14 +548,44 @@ def _get_unstructured_mesh_info(
                 node_lat_var = node_coords_attr[1]
 
         if not node_lon_var:
-            # Fallback
+            # Enhanced discovery using attributes and common names
+            for v in ds.variables:
+                if v == conn_var:
+                    continue
+                attrs = ds[v].attrs
+                if attrs.get("standard_name") == "longitude" and (
+                    "node" in v.lower() or attrs.get("location") == "node"
+                ):
+                    node_lon_var = v
+                if attrs.get("standard_name") == "latitude" and (
+                    "node" in v.lower() or attrs.get("location") == "node"
+                ):
+                    node_lat_var = v
+
+        if not node_lon_var:
+            # Last fallback
             node_lon_var = "node_lon" if "node_lon" in ds else "lon_node"
             node_lat_var = "node_lat" if "node_lat" in ds else "lat_node"
 
         if node_lon_var in ds and node_lat_var in ds:
-            node_lon = _normalize_longitudes(_to_degrees(ds[node_lon_var])).values
-            node_lat = _clip_latitudes(_to_degrees(ds[node_lat_var])).values
-            conn_raw = ds[conn_var].values
+            v_lon = ds[node_lon_var]
+            v_lat = ds[node_lat_var]
+            v_conn = ds[conn_var]
+
+            # Filter out non-spatial dimensions
+            for da in [v_lon, v_lat, v_conn]:
+                isel_dict = {d: 0 for d in non_spatial_dims if d in da.dims}
+                if isel_dict:
+                    if da is v_lon:
+                        v_lon = v_lon.isel(isel_dict, drop=True)
+                    elif da is v_lat:
+                        v_lat = v_lat.isel(isel_dict, drop=True)
+                    elif da is v_conn:
+                        v_conn = v_conn.isel(isel_dict, drop=True)
+
+            node_lon = _normalize_longitudes(_to_degrees(v_lon)).values
+            node_lat = _clip_latitudes(_to_degrees(v_lat)).values
+            conn_raw = v_conn.values
             start_index = ds[conn_var].attrs.get("start_index", 0)
             fill_value = ds[conn_var].attrs.get("_FillValue", -1)
 
@@ -434,7 +594,7 @@ def _get_unstructured_mesh_info(
             element_ids = []
             orig_cell_index = []
 
-            # Vectorized triangulation for UGRID (Aero Protocol: Performance)
+            # Vectorized triangulation for UGRID
             n_cells, max_edges = conn_raw.shape
             n_edges = np.sum(conn_raw != fill_value, axis=1)
             max_tris = max_edges - 2
@@ -501,13 +661,16 @@ def _create_esmf_grid(
     """
     import esmpy
 
+    non_spatial_dims = _get_non_spatial_dims(ds)
     lon, lat, shape, dims, is_unstructured = _get_mesh_info(ds)
     provenance = []
     orig_idx = None
 
     if is_unstructured:
         if coord_sys is None:
-            coord_sys = esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART
+            # For unstructured grids (MPAS/UGRID), coordinates are almost always
+            # geographic. Use SPH_DEG to handle the dateline wrap-around.
+            coord_sys = esmpy.CoordSys.SPH_DEG
 
         # Attempt Mesh creation for methods that support it on unstructured grids
         if method in ["conservative", "bilinear", "patch"]:
@@ -587,7 +750,11 @@ def _create_esmf_grid(
             )
 
         if mask_var and mask_var in ds:
-            locstream["ESMF:Mask"] = ds[mask_var].values.astype(np.int32)
+            v_mask = ds[mask_var]
+            mask_isel = {d: 0 for d in non_spatial_dims if d in v_mask.dims}
+            if mask_isel:
+                v_mask = v_mask.isel(mask_isel, drop=True)
+            locstream["ESMF:Mask"] = v_mask.values.astype(np.int32)
 
         return locstream, provenance, None
     else:
@@ -624,7 +791,7 @@ def _create_esmf_grid(
             staggerlocs.append(esmpy.StaggerLoc.CORNER)
 
         if coord_sys is None:
-            # Use CART for regional grids to avoid boundary chord issues (Aero Protocol: Robustness)
+            # Use CART for regional grids to avoid boundary chord issues
             # SPH_DEG is used only for periodic/global grids or unstructured meshes.
             coord_sys = esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART
 
@@ -675,8 +842,13 @@ def _create_esmf_grid(
             )
 
         if mask_var and mask_var in ds:
+            v_mask = ds[mask_var]
+            mask_isel = {d: 0 for d in non_spatial_dims if d in v_mask.dims}
+            if mask_isel:
+                v_mask = v_mask.isel(mask_isel, drop=True)
+
             grid.add_item(esmpy.GridItem.MASK, staggerloc=esmpy.StaggerLoc.CENTER)
             grid.get_item(esmpy.GridItem.MASK, staggerloc=esmpy.StaggerLoc.CENTER)[
                 ...
-            ] = ds[mask_var].values.T.astype(np.int32)
+            ] = v_mask.values.T.astype(np.int32)
         return grid, provenance, None

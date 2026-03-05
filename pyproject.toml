@@ -30,6 +30,15 @@ test = [
     "pooch",
     "pre-commit",
 ]
+docs = [
+    "zensical",
+    "mkdocstrings",
+    "mkdocstrings-python",
+    "mkdocs-gallery",
+    "matplotlib",
+    "cartopy",
+    "pooch",
+]
 viz = [
     "matplotlib",
     "cartopy",
@@ -44,3 +53,6 @@ full = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[project.scripts]
+xregrid = "xregrid.cli:main"

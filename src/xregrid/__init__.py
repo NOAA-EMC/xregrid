@@ -1,6 +1,7 @@
 from xregrid.utils import (
     create_global_grid,
     create_grid_from_crs,
+    create_grid_from_ioapi,
     create_mesh_from_coords,
     create_regional_grid,
     load_esmf_file,
@@ -17,6 +18,7 @@ __all__ = [
     "create_global_grid",
     "create_regional_grid",
     "create_grid_from_crs",
+    "create_grid_from_ioapi",
     "create_mesh_from_coords",
     "load_esmf_file",
 ]

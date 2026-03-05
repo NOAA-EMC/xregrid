@@ -8,6 +8,7 @@ XRegrid automatically detects unstructured grids by looking for:
 - Standard 1D coordinates sharing a dimension (e.g., `lat(nCells)`, `lon(nCells)`).
 - **MPAS-specific** coordinate names: `latCell`, `lonCell`, `latVertex`, `lonVertex`.
 - **UGRID-specific** coordinate names: `lat_node`, `lon_node`.
+- **UGRID Topology**: Robustly identifies `mesh_topology` variables with `cf_role="mesh_topology"` and associated connectivity roles.
 - **uxarray** objects: Automatically uses the underlying `.uxgrid` for coordinates and connectivity.
 
 ## Regridding Methods
@@ -19,10 +20,14 @@ For simple point-to-grid or grid-to-point regridding where connectivity is not a
 XRegrid now supports **conservative regridding** for unstructured grids by automatically constructing an ESMF `Mesh`. This requires connectivity information in the dataset:
 
 - **MPAS**: Requires `verticesOnCell` and vertex coordinates (`latVertex`, `lonVertex`).
-- **UGRID**: Requires `face_node_connectivity` with a `cf_role="face_node_connectivity"` attribute.
+- **UGRID**: Requires `face_node_connectivity` identified either by name or via the `cf_role="face_node_connectivity"` attribute.
 - **uxarray**: Automatically extracts connectivity from the `UxDataset` or `UxDataArray`.
 
 XRegrid automatically triangulates these polygons to ensure compatibility with ESMF's mesh requirements while correctly aggregating weights back to the original cells.
+
+## Scientific Hygiene
+
+XRegrid ensures that UGRID-specific metadata is preserved during regridding. If the target is also an unstructured grid following UGRID conventions, the output dataset will include the appropriate `mesh` and `location` attributes, as well as the `mesh_topology` variable.
 
 ## Dask Parallel Support
 

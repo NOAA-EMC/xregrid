@@ -89,7 +89,7 @@ def _apply_weights_core(
     np.ndarray
         The regridded data block.
     """
-    # Worker-local cache retrieval (Aero Protocol: Dask Efficiency)
+    # Worker-local cache retrieval
     weights_matrix_key = weights_key
     if isinstance(weights_matrix, str):
         weights_matrix_key = weights_matrix
@@ -123,7 +123,7 @@ def _apply_weights_core(
         flat_data = data_block.reshape(n_other, n_spatial)
 
     if skipna:
-        # Use a more memory-efficient NaN detection (Aero Protocol: Performance)
+        # Use a more memory-efficient NaN detection
         mask = np.isnan(flat_data)
         has_nans = np.any(mask)
 
@@ -138,7 +138,7 @@ def _apply_weights_core(
             is_mask_stationary = True
             if n_other > 1:
                 # Optimized stationary mask detection using heuristic early exit
-                # (Aero Protocol: Speedup for large grids)
+                #
                 mask0 = mask[0]
                 sample_size = min(1000, n_spatial)
                 # Check first sample points across all time steps first
