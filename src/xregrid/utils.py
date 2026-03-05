@@ -630,6 +630,19 @@ def create_grid_from_crs(
         lat_b = lat_b.transpose("y", "x", "nv")
         lon_b = lon_b.transpose("y", "x", "nv")
 
+        # Add 1D projected bounds using backend-agnostic xarray operations
+        x_b_da_1d = xr.concat(
+            [x_da - res_x / 2, x_da + res_x / 2], dim="nbounds"
+        ).transpose("x", "nbounds")
+        y_b_da_1d = xr.concat(
+            [y_da - res_y / 2, y_da + res_y / 2], dim="nbounds"
+        ).transpose("y", "nbounds")
+
+        ds.coords["x_b"] = (["x", "nbounds"], x_b_da_1d.data, {"units": units})
+        ds.coords["y_b"] = (["y", "nbounds"], y_b_da_1d.data, {"units": units})
+        ds["x"].attrs["bounds"] = "x_b"
+        ds["y"].attrs["bounds"] = "y_b"
+
         ds.coords["lat_b"] = (["y", "x", "nv"], lat_b.data, {"units": "degrees_north"})
         ds.coords["lon_b"] = (["y", "x", "nv"], lon_b.data, {"units": "degrees_east"})
 
@@ -652,9 +665,14 @@ def create_grid_from_ioapi(
     Supports GDTYP:
     - 1: Lat-Lon
     - 2: Lambert Conformal
-    - 5: Polar Stereographic
-    - 6: Albers Equal Area
-    - 7: Mercator
+    - 3: Mercator
+    - 4: Stereographic
+    - 5: UTM
+    - 6: Polar Stereographic
+    - 7: Equatorial Mercator
+    - 8: Transverse Mercator
+    - 9: Albers Equal Area
+    - 10: Lambert Azimuthal Equal Area / Sinusoidal
 
     Parameters
     ----------
@@ -685,25 +703,48 @@ def create_grid_from_ioapi(
 
     if gdtyp == 1:  # Lat-Lon
         crs = "EPSG:4326"
-        # In IOAPI Lat-Lon, XORIG/YORIG are degrees, XCELL/YCELL are degrees
     elif gdtyp == 2:  # Lambert Conformal
         crs = (
             f"+proj=lcc +lat_1={p_alp} +lat_2={p_bet} +lat_0={ycent} "
             f"+lon_0={xcent} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
         )
-    elif gdtyp == 5:  # Polar Stereographic
+    elif gdtyp == 3:  # Mercator
         crs = (
-            f"+proj=stere +lat_0={ycent} +lat_ts={p_alp} +lon_0={xcent} "
-            f"+k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+            f"+proj=merc +lat_ts={p_alp} +lon_0={xcent} +lat_0={ycent} "
+            f"+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
         )
-    elif gdtyp == 6:  # Albers Equal Area
+    elif gdtyp == 4:  # Stereographic
+        crs = (
+            f"+proj=stere +lat_ts={p_alp} +lat_0={ycent} +lon_0={xcent} "
+            f"+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+        )
+    elif gdtyp == 5:  # UTM
+        crs = f"+proj=utm +zone={int(p_alp)} +datum=WGS84 +units=m +no_defs"
+    elif gdtyp == 6:  # Polar Stereographic
+        # lat_0 determined by p_alp (1.0 for North, -1.0 for South)
+        lat_0 = 90.0 if p_alp > 0 else -90.0
+        crs = (
+            f"+proj=stere +lat_0={lat_0} +lat_ts={p_bet} +lon_0={xcent} "
+            f"+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+        )
+    elif gdtyp == 7:  # Equatorial Mercator
+        crs = (
+            f"+proj=merc +lat_ts={p_alp} +lon_0={xcent} +lat_0=0 "
+            f"+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+        )
+    elif gdtyp == 8:  # Transverse Mercator
+        crs = (
+            f"+proj=tmerc +lat_0={ycent} +k={p_bet} +lon_0={xcent} "
+            f"+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+        )
+    elif gdtyp == 9:  # Albers Equal Area
         crs = (
             f"+proj=aea +lat_1={p_alp} +lat_2={p_bet} +lat_0={ycent} "
             f"+lon_0={xcent} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
         )
-    elif gdtyp == 7:  # Mercator
+    elif gdtyp == 10:  # Lambert Azimuthal Equal Area
         crs = (
-            f"+proj=merc +lat_ts={p_alp} +lon_0={xcent} "
+            f"+proj=laea +lat_0={ycent} +lon_0={xcent} "
             f"+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
         )
     else:
