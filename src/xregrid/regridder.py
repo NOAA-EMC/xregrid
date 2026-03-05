@@ -212,9 +212,18 @@ class Regridder:
             ):
                 is_geographic = False
 
-            # Use SPH_DEG if coordinates are geographic or if periodic=True.
-            # This is critical to avoid "streaking" artifacts at the dateline.
-            if periodic or is_geographic:
+            # Determine if we have unstructured grids
+            _, _, _, _, is_unstructured_src = _get_mesh_info(source_grid_ds)
+            _, _, _, _, is_unstructured_tgt = _get_mesh_info(target_grid_ds)
+
+            # Use SPH_DEG if:
+            # 1. periodic=True
+            # 2. OR it's geographic AND either grid is unstructured (to handle dateline crossing swaths)
+            # Structured non-periodic grids continue using CART by default to maintain
+            # backward compatibility and avoid unwanted wrap-around in regional cases.
+            if periodic or (
+                is_geographic and (is_unstructured_src or is_unstructured_tgt)
+            ):
                 self._coord_sys = esmpy.CoordSys.SPH_DEG
             else:
                 self._coord_sys = esmpy.CoordSys.CART
@@ -1883,7 +1892,7 @@ class Regridder:
         try:
             from xregrid.utils import _find_coord
 
-            lon = _find_coord(ds, "lon")
+            lon = _find_coord(ds, "longitude")
             if lon is not None:
                 # 1. Check metadata
                 if lon.attrs.get("boundary") == "periodic":
