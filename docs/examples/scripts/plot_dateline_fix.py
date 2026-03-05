@@ -12,6 +12,7 @@ import xarray as xr
 from xregrid import Regridder
 from xregrid.utils import create_global_grid
 
+
 def run_example():
     # 1. Create a synthetic unstructured swath crossing the dateline
     # We'll create points from 170E to 190E (which is 170W)
@@ -24,8 +25,16 @@ def run_example():
     # Create the source Dataset
     ds_src = xr.Dataset(
         coords={
-            "lon": ("n_pts", lon, {"units": "degrees_east", "standard_name": "longitude"}),
-            "lat": ("n_pts", lat, {"units": "degrees_north", "standard_name": "latitude"}),
+            "lon": (
+                "n_pts",
+                lon,
+                {"units": "degrees_east", "standard_name": "longitude"},
+            ),
+            "lat": (
+                "n_pts",
+                lat,
+                {"units": "degrees_north", "standard_name": "latitude"},
+            ),
         }
     )
     # Synthetic data: a gradient along the swath
@@ -45,11 +54,15 @@ def run_example():
     ds_regrid = regridder(ds_src)
 
     print("Regridding complete.")
-    print(f"Source Longitude Range: {ds_src.lon.min().values:.1f} to {ds_src.lon.max().values:.1f}")
+    print(f"Output Variables: {list(ds_regrid.data_vars)}")
+    print(
+        f"Source Longitude Range: {ds_src.lon.min().values:.1f} to {ds_src.lon.max().values:.1f}"
+    )
     print("Coordinates crossing the dateline are handled correctly by using SPH_DEG.")
 
     # In a real environment with matplotlib:
     # regridder.plot_comparison(ds_src.swath_data, ds_regrid.swath_data)
+
 
 if __name__ == "__main__":
     run_example()
