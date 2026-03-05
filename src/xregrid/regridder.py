@@ -201,9 +201,24 @@ class Regridder:
 
         # Determine coordinate system for consistency
         if esmpy is not None:
-            self._coord_sys = (
-                esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART
-            )
+            # Detect if the grids are geographic (lat-lon in degrees)
+            src_crs = get_crs_info(source_grid_ds)
+            tgt_crs = get_crs_info(target_grid_ds)
+
+            # Default to geographic if no CRS found (common for simple lat-lon)
+            is_geographic = True
+            if (src_crs and not src_crs.is_geographic) or (
+                tgt_crs and not tgt_crs.is_geographic
+            ):
+                is_geographic = False
+
+            # Use SPH_DEG if coordinates are geographic or if periodic=True.
+            # This is critical to avoid "streaking" artifacts at the dateline.
+            if periodic or is_geographic:
+                self._coord_sys = esmpy.CoordSys.SPH_DEG
+            else:
+                self._coord_sys = esmpy.CoordSys.CART
+
             self.method_map = {
                 "bilinear": esmpy.RegridMethod.BILINEAR,
                 "conservative": esmpy.RegridMethod.CONSERVE,

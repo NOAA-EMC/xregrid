@@ -668,7 +668,9 @@ def _create_esmf_grid(
 
     if is_unstructured:
         if coord_sys is None:
-            coord_sys = esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART
+            # For unstructured grids (MPAS/UGRID), coordinates are almost always
+            # geographic. Use SPH_DEG to handle the dateline wrap-around.
+            coord_sys = esmpy.CoordSys.SPH_DEG
 
         # Attempt Mesh creation for methods that support it on unstructured grids
         if method in ["conservative", "bilinear", "patch"]:
