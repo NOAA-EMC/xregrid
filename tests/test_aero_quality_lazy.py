@@ -41,9 +41,9 @@ def test_aero_quality_lazy_distributed(dask_client):
 
     # Verify report_eager is indeed eager
     for var in report_eager.data_vars:
-        assert not hasattr(
-            report_eager[var].data, "dask"
-        ), f"{var} should be NumPy-backed"
+        assert not hasattr(report_eager[var].data, "dask"), (
+            f"{var} should be NumPy-backed"
+        )
 
     # 2. Lazy (Dask) Path
     regridder_lazy = Regridder(src, tgt, parallel=True)
@@ -51,15 +51,15 @@ def test_aero_quality_lazy_distributed(dask_client):
 
     # Verify report_lazy preserves laziness for heavy metrics
     assert hasattr(report_lazy.n_weights.data, "dask"), "n_weights should be lazy"
-    assert hasattr(
-        report_lazy.unmapped_count.data, "dask"
-    ), "unmapped_count should be lazy"
-    assert hasattr(
-        report_lazy.unmapped_fraction.data, "dask"
-    ), "unmapped_fraction should be lazy"
-    assert hasattr(
-        report_lazy.weight_sum_min.data, "dask"
-    ), "weight_sum_min should be lazy"
+    assert hasattr(report_lazy.unmapped_count.data, "dask"), (
+        "unmapped_count should be lazy"
+    )
+    assert hasattr(report_lazy.unmapped_fraction.data, "dask"), (
+        "unmapped_fraction should be lazy"
+    )
+    assert hasattr(report_lazy.weight_sum_min.data, "dask"), (
+        "weight_sum_min should be lazy"
+    )
 
     # 3. Double-Check Identity
     # Computing the lazy report should yield identical results to the eager one

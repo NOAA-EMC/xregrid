@@ -1516,6 +1516,7 @@ class Regridder:
         _processed_ids: Optional[set[Union[int, str]]] = None,
         skipna: Optional[bool] = None,
         na_thres: Optional[float] = None,
+        _precomputed_aux: Optional[dict[str, xr.DataArray]] = None,
     ) -> xr.DataArray:
         """
         Regrid a single DataArray, including auxiliary spatial coordinates.
@@ -1532,6 +1533,8 @@ class Regridder:
             Whether to handle NaNs. If None, uses initialization default.
         na_thres : float, optional
             NaN threshold. If None, uses initialization default.
+        _precomputed_aux : dict, optional
+            Pre-regridded auxiliary coordinates to avoid redundant computation.
 
         Returns
         -------
@@ -1600,13 +1603,17 @@ class Regridder:
                 d in c_da.dims for d in self._dims_source
             ):
                 # This is an auxiliary spatial coordinate
-                aux_coords_to_regrid[c_name] = self._regrid_dataarray(
-                    c_da,
-                    update_history_attr=False,
-                    _processed_ids=_processed_ids,
-                    skipna=skipna,
-                    na_thres=na_thres,
-                )
+                if _precomputed_aux and c_name in _precomputed_aux:
+                    aux_coords_to_regrid[c_name] = _precomputed_aux[c_name]
+                else:
+                    aux_coords_to_regrid[c_name] = self._regrid_dataarray(
+                        c_da,
+                        update_history_attr=False,
+                        _processed_ids=_processed_ids,
+                        skipna=skipna,
+                        na_thres=na_thres,
+                        _precomputed_aux=_precomputed_aux,
+                    )
 
         # CF-Awareness: Map logical dimensions to physical dimension names in da_in
 
@@ -1905,7 +1912,13 @@ class Regridder:
                     return True
 
                 # 2. Check eager values (dimension coordinates are eager in xarray)
-                if not hasattr(lon.data, "dask"):
+                is_lazy = False
+                if is_dask_collection:
+                    is_lazy = is_dask_collection(lon.data)
+                else:
+                    is_lazy = hasattr(lon.data, "dask")
+
+                if not is_lazy:
                     lon_min = float(lon.min())
                     lon_max = float(lon.max())
                     extent = lon_max - lon_min
@@ -1961,7 +1974,26 @@ class Regridder:
         # Identify non-spatial variables to exclude from regridding
         non_spatial_dims = _get_non_spatial_dims(ds_in)
 
-        # 1. Regrid data variables
+        # 1. Pre-regrid all unique auxiliary spatial coordinates to avoid redundancy.
+        # This reduces Dask graph complexity and avoids redundant ESMF weight applications.
+        precomputed_aux: dict[str, xr.DataArray] = {}
+        for c_name, c_da in ds_in.coords.items():
+            if c_name in ds_in.dims:
+                continue
+            if c_name in non_spatial_dims:
+                continue
+
+            # Check if this is an auxiliary spatial coordinate
+            if all(d in c_da.dims for d in self._dims_source):
+                precomputed_aux[c_name] = self._regrid_dataarray(
+                    c_da,
+                    update_history_attr=False,
+                    _processed_ids={id(c_da), c_name},
+                    skipna=skipna,
+                    na_thres=na_thres,
+                )
+
+        # 2. Regrid data variables
         for name, da in ds_in.data_vars.items():
             # Skip if variable itself is a non-spatial coordinate/dimension
             if name in non_spatial_dims:
@@ -2004,13 +2036,14 @@ class Regridder:
                     _processed_ids={id(da), name},
                     skipna=skipna,
                     na_thres=na_thres,
+                    _precomputed_aux=precomputed_aux,
                 )
             else:
                 regridded_items[name] = da
 
         out = xr.Dataset(regridded_items, attrs=ds_in.attrs)
 
-        # 2. Scientific Hygiene: Regrid auxiliary spatial coordinates and preserve others
+        # 3. Scientific Hygiene: Attach regridded auxiliary coordinates and preserve others
         # and ensure grid_mapping from target grid is attached.
         for c in ds_in.coords:
             if c in out.coords:
@@ -2021,21 +2054,9 @@ class Regridder:
                 out = out.assign_coords({c: ds_in.coords[c]})
                 continue
 
-            # Check if this coordinate depends on spatial dimensions
-            if all(d in ds_in.coords[c].dims for d in self._dims_source):
-                # If it's not a dimension coordinate, regrid it
-                if c not in ds_in.dims:
-                    out = out.assign_coords(
-                        {
-                            c: self._regrid_dataarray(
-                                ds_in.coords[c],
-                                update_history_attr=False,
-                                _processed_ids={id(ds_in.coords[c]), c},
-                                skipna=skipna,
-                                na_thres=na_thres,
-                            )
-                        }
-                    )
+            # Check if this coordinate was pre-regridded
+            if c in precomputed_aux:
+                out = out.assign_coords({c: precomputed_aux[c]})
             else:
                 # Not dependent on spatial dims, just preserve it
                 out = out.assign_coords({c: ds_in.coords[c]})
