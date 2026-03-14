@@ -25,6 +25,15 @@ except ImportError:
 import xarray as xr
 
 
+def _lazy_arange(
+    start: float, stop: float, step: float, chunks: Optional[int] = None
+) -> Any:
+    """Helper to create a lazy dask range or eager numpy range."""
+    if chunks is not None and da is not None:
+        return da.arange(start, stop, step, chunks=chunks)
+    return np.arange(start, stop, step)
+
+
 def _create_rectilinear_grid(
     lat_range: Tuple[float, float],
     lon_range: Tuple[float, float],
@@ -40,9 +49,9 @@ def _create_rectilinear_grid(
 
     Parameters
     ----------
-    lat_range : tuple of float
+    lat_range : Tuple[float, float]
         (min_lat, max_lat).
-    lon_range : tuple of float
+    lon_range : Tuple[float, float]
         (min_lon, max_lon).
     res_lat : float
         Latitude resolution in degrees.
@@ -50,41 +59,38 @@ def _create_rectilinear_grid(
         Longitude resolution in degrees.
     add_bounds : bool, default True
         Whether to add cell boundary coordinates.
-    chunks : int or dict, optional
+    chunks : int or Dict[str, int], optional
         Chunk sizes for the resulting dask-backed dataset.
     history_msg : str, optional
         Message to add to the history attribute.
+    crs : str, default "EPSG:4326"
+        CRS identifier.
 
     Returns
     -------
     xr.Dataset
         The generated grid dataset.
     """
-    if chunks is not None and da is not None:
-        # Convert chunks to integer if it's a dict for 1D arrays
-        lat_chunks = chunks.get("lat", -1) if isinstance(chunks, dict) else chunks
-        lon_chunks = chunks.get("lon", -1) if isinstance(chunks, dict) else chunks
+    lat_chunks = chunks.get("lat", -1) if isinstance(chunks, dict) else chunks
+    lon_chunks = chunks.get("lon", -1) if isinstance(chunks, dict) else chunks
 
-        lat = da.arange(
-            lat_range[0] + res_lat / 2, lat_range[1], res_lat, chunks=lat_chunks
-        )
-        lon = da.arange(
-            lon_range[0] + res_lon / 2, lon_range[1], res_lon, chunks=lon_chunks
-        )
-    else:
-        lat = np.arange(lat_range[0] + res_lat / 2, lat_range[1], res_lat)
-        lon = np.arange(lon_range[0] + res_lon / 2, lon_range[1], res_lon)
+    lat_arr = _lazy_arange(
+        lat_range[0] + res_lat / 2, lat_range[1], res_lat, chunks=lat_chunks
+    )
+    lon_arr = _lazy_arange(
+        lon_range[0] + res_lon / 2, lon_range[1], res_lon, chunks=lon_chunks
+    )
 
     ds = xr.Dataset(
         coords={
             "lat": (
                 ["lat"],
-                lat,
+                lat_arr,
                 {"units": "degrees_north", "standard_name": "latitude"},
             ),
             "lon": (
                 ["lon"],
-                lon,
+                lon_arr,
                 {"units": "degrees_east", "standard_name": "longitude"},
             ),
         }
@@ -92,31 +98,18 @@ def _create_rectilinear_grid(
 
     if add_bounds:
         # Use CF-compliant (N, 2) bounds.
+        # Ensure identical length handling for lazy/eager
+        lat_b_1d = _lazy_arange(
+            lat_range[0], lat_range[1] + res_lat, res_lat, chunks=lat_chunks
+        )[: lat_arr.size + 1]
+        lon_b_1d = _lazy_arange(
+            lon_range[0], lon_range[1] + res_lon, res_lon, chunks=lon_chunks
+        )[: lon_arr.size + 1]
+
         if chunks is not None and da is not None:
-            lat_b_1d = da.arange(
-                lat_range[0], lat_range[1] + res_lat, res_lat, chunks=lat_chunks
-            )
-            lon_b_1d = da.arange(
-                lon_range[0], lon_range[1] + res_lon, res_lon, chunks=lon_chunks
-            )
-
-            # Handle potential floating point overshoot from da.arange
-            # In dask, we use slicing which is lazy
-            lat_b_1d = lat_b_1d[: lat.size + 1]
-            lon_b_1d = lon_b_1d[: lon.size + 1]
-
             lat_b_2d = da.stack([lat_b_1d[:-1], lat_b_1d[1:]], axis=1)
             lon_b_2d = da.stack([lon_b_1d[:-1], lon_b_1d[1:]], axis=1)
         else:
-            lat_b_1d = np.arange(lat_range[0], lat_range[1] + res_lat, res_lat)
-            lon_b_1d = np.arange(lon_range[0], lon_range[1] + res_lon, res_lon)
-
-            # Handle potential floating point overshoot from np.arange
-            if len(lat_b_1d) > len(lat) + 1:
-                lat_b_1d = lat_b_1d[: len(lat) + 1]
-            if len(lon_b_1d) > len(lon) + 1:
-                lon_b_1d = lon_b_1d[: len(lon) + 1]
-
             lat_b_2d = np.stack([lat_b_1d[:-1], lat_b_1d[1:]], axis=1)
             lon_b_2d = np.stack([lon_b_1d[:-1], lon_b_1d[1:]], axis=1)
 
@@ -134,9 +127,7 @@ def _create_rectilinear_grid(
         ds["lat"].attrs["bounds"] = "lat_b"
         ds["lon"].attrs["bounds"] = "lon_b"
 
-    # Aero Protocol: Explicit CRS attribution
     ds.attrs["crs"] = crs
-
     if history_msg:
         update_history(ds, history_msg)
 
@@ -492,16 +483,15 @@ def create_grid_from_crs(
     ----------
     crs : str, int, or pyproj.CRS
         The CRS of the grid (Proj4 string, EPSG code, WKT, or CRS object).
-    extent : tuple of float
+    extent : Tuple[float, float, float, float]
         Grid extent in CRS units: (min_x, max_x, min_y, max_y).
-    res : float or tuple of float
+    res : float or Tuple[float, float]
         Grid resolution in CRS units. If float, same resolution in x and y.
         If tuple, (res_x, res_y).
     add_bounds : bool, default True
         Whether to add cell boundary coordinates.
-    chunks : int or dict, optional
+    chunks : int or Dict[str, int], optional
         Chunk sizes for the resulting dask-backed dataset.
-        If None (default), returns an eager NumPy-backed dataset.
 
     Returns
     -------
@@ -513,17 +503,12 @@ def create_grid_from_crs(
     else:
         res_x, res_y = map(float, res)
 
-    # Generate 1D coordinates in projected space
-    if chunks is not None and da is not None:
-        # Handle dict or int chunks for 1D arrays
-        x_chunks = chunks.get("x", -1) if isinstance(chunks, dict) else chunks
-        y_chunks = chunks.get("y", -1) if isinstance(chunks, dict) else chunks
+    x_chunks = chunks.get("x", -1) if isinstance(chunks, dict) else chunks
+    y_chunks = chunks.get("y", -1) if isinstance(chunks, dict) else chunks
 
-        x = da.arange(extent[0] + res_x / 2, extent[1], res_x, chunks=x_chunks)
-        y = da.arange(extent[2] + res_y / 2, extent[3], res_y, chunks=y_chunks)
-    else:
-        x = np.arange(extent[0] + res_x / 2, extent[1], res_x)
-        y = np.arange(extent[2] + res_y / 2, extent[3], res_y)
+    # Generate 1D coordinates in projected space
+    x = _lazy_arange(extent[0] + res_x / 2, extent[1], res_x, chunks=x_chunks)
+    y = _lazy_arange(extent[2] + res_y / 2, extent[3], res_y, chunks=y_chunks)
 
     x_da = xr.DataArray(x, dims=["x"], name="x")
     y_da = xr.DataArray(y, dims=["y"], name="y")
@@ -535,15 +520,10 @@ def create_grid_from_crs(
     yy_da = yy_da.transpose("y", "x")
     xx_da = xx_da.transpose("y", "x")
 
-    # Transform to lat/lon
     if pyproj is None:
-        raise ImportError(
-            "pyproj is required for create_grid_from_crs. "
-            "Install it with `pip install pyproj`."
-        )
+        raise ImportError("pyproj is required for create_grid_from_crs.")
     crs_obj = pyproj.CRS(crs)
 
-    # Use apply_ufunc with dask='parallelized'
     lon, lat = xr.apply_ufunc(
         _transform_coords,
         xx_da,
@@ -555,7 +535,6 @@ def create_grid_from_crs(
         output_core_dims=[[], []],
     )
 
-    # Try to get units from CRS, default to 'm'
     try:
         units = crs_obj.axis_info[0].unit_name or "m"
     except (IndexError, AttributeError):
@@ -586,13 +565,9 @@ def create_grid_from_crs(
         }
     )
 
-    # Store CRS info
     ds.attrs["crs"] = crs_obj.to_wkt()
 
     if add_bounds:
-        # Create CF-compliant curvilinear bounds (Y, X, 4)
-        # This ensures bounds are sliced correctly with centers
-
         if chunks is not None and da is not None:
             x_b_raw = da.stack(
                 [x - res_x / 2, x + res_x / 2, x + res_x / 2, x - res_x / 2]
@@ -608,13 +583,11 @@ def create_grid_from_crs(
                 [y - res_y / 2, y - res_y / 2, y + res_y / 2, y + res_y / 2]
             )
 
-        x_b_da = xr.DataArray(x_b_raw, dims=["nv", "x"], name="x_b")
-        y_b_da = xr.DataArray(y_b_raw, dims=["nv", "y"], name="y_b")
+        x_b_da = xr.DataArray(x_b_raw, dims=["nv", "x"])
+        y_b_da = xr.DataArray(y_b_raw, dims=["nv", "y"])
 
-        # Broadcast them to (nv, y, x)
         yy_b_da, xx_b_da = xr.broadcast(y_b_da, x_b_da)
 
-        # Transform corners lazily
         lon_b, lat_b = xr.apply_ufunc(
             _transform_coords,
             xx_b_da,
@@ -626,31 +599,39 @@ def create_grid_from_crs(
             output_core_dims=[[], []],
         )
 
-        # Reshape to (y, x, nv) for CF compliance
-        lat_b = lat_b.transpose("y", "x", "nv")
-        lon_b = lon_b.transpose("y", "x", "nv")
-
-        # Add 1D projected bounds using backend-agnostic xarray operations
-        x_b_da_1d = xr.concat(
-            [x_da - res_x / 2, x_da + res_x / 2], dim="nbounds"
-        ).transpose("x", "nbounds")
-        y_b_da_1d = xr.concat(
-            [y_da - res_y / 2, y_da + res_y / 2], dim="nbounds"
-        ).transpose("y", "nbounds")
-
-        ds.coords["x_b"] = (["x", "nbounds"], x_b_da_1d.data, {"units": units})
-        ds.coords["y_b"] = (["y", "nbounds"], y_b_da_1d.data, {"units": units})
-        ds["x"].attrs["bounds"] = "x_b"
-        ds["y"].attrs["bounds"] = "y_b"
-
-        ds.coords["lat_b"] = (["y", "x", "nv"], lat_b.data, {"units": "degrees_north"})
-        ds.coords["lon_b"] = (["y", "x", "nv"], lon_b.data, {"units": "degrees_east"})
-
+        ds.coords["lat_b"] = (
+            ["y", "x", "nv"],
+            lat_b.data.transpose(1, 2, 0),
+            {"units": "degrees_north"},
+        )
+        ds.coords["lon_b"] = (
+            ["y", "x", "nv"],
+            lon_b.data.transpose(1, 2, 0),
+            {"units": "degrees_east"},
+        )
         ds["lat"].attrs["bounds"] = "lat_b"
         ds["lon"].attrs["bounds"] = "lon_b"
 
-    update_history(ds, f"Created grid from CRS {crs} using xregrid (Lazy Generation).")
+        # Add 1D projected bounds using backend-agnostic xarray operations
+        x_da_1d = xr.DataArray(x, dims=["x"])
+        y_da_1d = xr.DataArray(y, dims=["y"])
 
+        # Create (N, 2) bounds
+        x_b_1d = xr.concat(
+            [x_da_1d - res_x / 2, x_da_1d + res_x / 2], dim="nbounds"
+        ).transpose("x", "nbounds")
+        y_b_1d = xr.concat(
+            [y_da_1d - res_y / 2, y_da_1d + res_y / 2], dim="nbounds"
+        ).transpose("y", "nbounds")
+
+        ds.coords["x_b"] = (["x", "nbounds"], x_b_1d.data, {"units": units})
+        ds.coords["y_b"] = (["y", "nbounds"], y_b_1d.data, {"units": units})
+        ds["x"].attrs["bounds"] = "x_b"
+        ds["y"].attrs["bounds"] = "y_b"
+
+    update_history(ds, f"Created grid from CRS {crs} using xregrid.")
+    if chunks is not None:
+        ds = ds.chunk(chunks)
     return ds
 
 
@@ -1102,8 +1083,14 @@ def create_mesh_from_coords(
     y_da = xr.DataArray(y, dims=["n_pts"], name="y")
 
     if chunks is not None:
-        x_da = x_da.chunk(chunks)
-        y_da = y_da.chunk(chunks)
+        # Mesh coordinates share the 'n_pts' dimension.
+        # If chunks is a dict, we filter for relevant dimensions.
+        if isinstance(chunks, dict):
+            x_da = x_da.chunk({k: v for k, v in chunks.items() if k in x_da.dims})
+            y_da = y_da.chunk({k: v for k, v in chunks.items() if k in y_da.dims})
+        else:
+            x_da = x_da.chunk(chunks)
+            y_da = y_da.chunk(chunks)
 
     # Use apply_ufunc with dask='parallelized'
     lon, lat = xr.apply_ufunc(
