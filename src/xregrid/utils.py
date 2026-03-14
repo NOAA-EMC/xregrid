@@ -612,6 +612,23 @@ def create_grid_from_crs(
         ds["lat"].attrs["bounds"] = "lat_b"
         ds["lon"].attrs["bounds"] = "lon_b"
 
+        # Add 1D projected bounds using backend-agnostic xarray operations
+        x_da_1d = xr.DataArray(x, dims=["x"])
+        y_da_1d = xr.DataArray(y, dims=["y"])
+
+        # Create (N, 2) bounds
+        x_b_1d = xr.concat(
+            [x_da_1d - res_x / 2, x_da_1d + res_x / 2], dim="nbounds"
+        ).transpose("x", "nbounds")
+        y_b_1d = xr.concat(
+            [y_da_1d - res_y / 2, y_da_1d + res_y / 2], dim="nbounds"
+        ).transpose("y", "nbounds")
+
+        ds.coords["x_b"] = (["x", "nbounds"], x_b_1d.data, {"units": units})
+        ds.coords["y_b"] = (["y", "nbounds"], y_b_1d.data, {"units": units})
+        ds["x"].attrs["bounds"] = "x_b"
+        ds["y"].attrs["bounds"] = "y_b"
+
     update_history(ds, f"Created grid from CRS {crs} using xregrid.")
     if chunks is not None:
         ds = ds.chunk(chunks)
@@ -1066,11 +1083,11 @@ def create_mesh_from_coords(
     y_da = xr.DataArray(y, dims=["n_pts"], name="y")
 
     if chunks is not None:
+        # Mesh coordinates share the 'n_pts' dimension.
+        # If chunks is a dict, we filter for relevant dimensions.
         if isinstance(chunks, dict):
-            x_chunks = {k: v for k, v in chunks.items() if k == "x"}
-            y_chunks = {k: v for k, v in chunks.items() if k == "y"}
-            x_da = x_da.chunk(x_chunks) if x_chunks else x_da.chunk(-1)
-            y_da = y_da.chunk(y_chunks) if y_chunks else y_da.chunk(-1)
+            x_da = x_da.chunk({k: v for k, v in chunks.items() if k in x_da.dims})
+            y_da = y_da.chunk({k: v for k, v in chunks.items() if k in y_da.dims})
         else:
             x_da = x_da.chunk(chunks)
             y_da = y_da.chunk(chunks)
