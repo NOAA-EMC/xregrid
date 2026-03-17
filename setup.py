@@ -63,7 +63,9 @@ def get_install_requires():
             # User has ESMF but maybe not esmpy yet; they likely want to build it.
             print("\n" + "=" * 80)
             print("NOTICE: ESMFMKFILE detected but esmpy is not installed.")
-            print("We are omitting the 'esmpy' requirement to allow manual installation.")
+            print(
+                "We are omitting the 'esmpy' requirement to allow manual installation."
+            )
             print("Please install esmpy from the ESMF source tree:")
             print("  cd $ESMF_DIR/src/addon/esmpy && python setup.py install")
             print("=" * 80 + "\n")
