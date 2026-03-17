@@ -172,15 +172,22 @@ def _get_mesh_info(
         lon = lon.isel(lon_isel, drop=True)
 
     # UGRID: Check for 'mesh' and 'location' attributes or topology to confirm unstructured
-    is_ugrid = False
+    # Also check for common atmospheric model dimensions like 'ncol'
+    is_unstructured_fmt = False
     if "mesh" in lat.attrs and "location" in lat.attrs:
-        is_ugrid = True
+        is_unstructured_fmt = True
     elif "mesh" in lon.attrs and "location" in lon.attrs:
-        is_ugrid = True
+        is_unstructured_fmt = True
+    elif "ncol" in lat.dims or "ncol" in ds.dims:
+        # Common CAM-SE / MUSICA dimension
+        is_unstructured_fmt = True
+    elif "grid_size" in lat.dims or "grid_size" in ds.dims:
+        # Common SCRIP dimension
+        is_unstructured_fmt = True
     else:
         for var in ds.variables:
             if ds[var].attrs.get("cf_role") == "mesh_topology":
-                is_ugrid = True
+                is_unstructured_fmt = True
                 break
 
     if lat.ndim == 2:
@@ -189,8 +196,8 @@ def _get_mesh_info(
             lon = lon.transpose(*lat.dims)
         return lon, lat, lat.shape, lat.dims, False
     elif lat.ndim == 1:
-        if lat.dims == lon.dims or is_ugrid:
-            # Unstructured (e.g. MPAS or UGRID)
+        if lat.dims == lon.dims or is_unstructured_fmt:
+            # Unstructured (e.g. MPAS, UGRID, or CAM-SE)
             return lon, lat, lat.shape, lat.dims, True
         else:
             # Rectilinear
@@ -366,6 +373,7 @@ def _normalize_longitudes(da: xr.DataArray, lon0: float = 0.0) -> xr.DataArray:
 
 def _get_unstructured_mesh_info(
     ds: xr.Dataset,
+    method: str = "conservative",
 ) -> Tuple[
     np.ndarray,  # node_lon
     np.ndarray,  # node_lat
@@ -514,7 +522,31 @@ def _get_unstructured_mesh_info(
             orig_cell_index.astype(np.int32),
         )
 
-    # 2. Detect UGRID (Standard Compliance)
+    # 2. Detect CAM-SE (ncol format)
+    # CAM-SE often has (lat, lon) on dimension 'ncol'.
+    if (
+        "lat" in ds
+        and "lon" in ds
+        and ("ncol" in ds.dims or "ncol" in ds["lat"].dims)
+        and method != "conservative"
+    ):
+        # CAM-SE non-conservative regridding only needs node locations
+        # We return empty connectivity because it's not strictly required for LocStream
+        # but _get_unstructured_mesh_info is used for Mesh creation.
+        # If method is not conservative, _create_esmf_grid will fallback to LocStream
+        # if Mesh creation fails. However, we can try to provide minimal mesh info.
+        node_lat = _clip_latitudes(_to_degrees(ds["lat"])).values
+        node_lon = _normalize_longitudes(_to_degrees(ds["lon"])).values
+        return (
+            node_lon,
+            node_lat,
+            np.array([], dtype=np.int32),
+            np.array([], dtype=np.int32),
+            np.array([], dtype=np.int32),
+            None,
+        )
+
+    # 3. Detect UGRID (Standard Compliance)
     mesh_var = None
     for var in ds.variables:
         if ds[var].attrs.get("cf_role") == "mesh_topology":
@@ -682,7 +714,7 @@ def _create_esmf_grid(
                     element_types,
                     element_ids,
                     orig_idx,
-                ) = _get_unstructured_mesh_info(ds)
+                ) = _get_unstructured_mesh_info(ds, method=method)
 
                 mesh = esmpy.Mesh(
                     parametric_dim=2,

@@ -50,6 +50,12 @@ pip install -e ".[test]"
 pip install mkdocs mkdocs-material mkdocs-gallery
 ```
 
+## Installing against an existing ESMPy installation
+
+If you already have `esmpy` installed in your environment (e.g., via a custom ESMF build or a shared HPC module), `xregrid` will automatically detect it during installation and will not attempt to reinstall it.
+
+If `esmpy` is not found, `pip install .` will still succeed but will issue a warning. You will need to install `esmpy` separately for `xregrid` to function.
+
 ## Alternative: Installing ESMPy from Source
 
 If you need to build `esmpy` from source (e.g., for a specific ESMF version or custom build), follow these steps:

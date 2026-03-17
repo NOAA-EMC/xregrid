@@ -16,6 +16,12 @@ mamba env create -f environment.yml
 mamba activate xregrid
 ```
 
+## Important: ESMPy Dependency
+
+XRegrid depends on `esmpy`, which is the Python interface to the Earth System Modeling Framework (ESMF). **ESMPy is not available on PyPI**.
+
+If you are not using `mamba`/`conda`, you must ensure `esmpy` is installed manually before or after installing `xregrid`. XRegrid's installation will proceed without it, but it will not function until `esmpy` is present.
+
 ## Detailed Instructions
 
 For more detailed installation options, including building from source or handling specific platform requirements, please see our [Online Installation Guide](https://xregrid.readthedocs.io/installation/).
