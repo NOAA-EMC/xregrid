@@ -389,10 +389,32 @@ def _find_coord(
         except Exception:
             pass
 
-    # Fallback to common names
+    # Fallback to common names (including those used in SCRIP, CAM-SE, MUSICA, CAM-fv)
     names = {
-        "latitude": ["lat", "latCell", "lat_face", "lat_node", "latitude", "yc", "y"],
-        "longitude": ["lon", "lonCell", "lon_face", "lon_node", "longitude", "xc", "x"],
+        "latitude": [
+            "lat",
+            "latCell",
+            "lat_face",
+            "lat_node",
+            "latitude",
+            "yc",
+            "y",
+            "LAT",
+            "Latitude",
+            "grid_center_lat",
+        ],
+        "longitude": [
+            "lon",
+            "lonCell",
+            "lon_face",
+            "lon_node",
+            "longitude",
+            "xc",
+            "x",
+            "LON",
+            "Longitude",
+            "grid_center_lon",
+        ],
     }
 
     # 1. Prioritize dimension coordinates that match fallback names
