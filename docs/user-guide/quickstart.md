@@ -262,7 +262,7 @@ for file in files:
 
 ## Next Steps
 
-- Explore the [Examples Gallery](../examples/generated/index.md) for more complex use cases
+- Explore the [Examples Gallery](../examples/scripts/README.md) for more complex use cases
 - Learn about [Performance Optimization](performance.md) for large datasets
 - Check the [API Reference](../api/regridder.md) for all available options
 

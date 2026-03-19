@@ -16,7 +16,7 @@ nav = [
         { "Performance" = "user-guide/performance.md" }
     ]},
     { "Examples" = [
-        { "Gallery" = "examples/generated/index.md" }
+        { "Gallery" = "examples/scripts/README.md" }
     ]},
     { "API Reference" = [
         { "Regridder" = "api/regridder.md" },
@@ -57,7 +57,7 @@ toggle.name = "Switch to light mode"
 [project.plugins.search]
 [project.plugins.gallery]
 examples_dirs = "docs/examples/scripts"
-gallery_dirs = "docs/examples/generated"
+gallery_dirs = "docs/examples/scripts"
 
 [project.plugins.mkdocstrings.handlers.python]
 paths = ["src"]
