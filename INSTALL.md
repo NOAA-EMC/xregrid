@@ -6,7 +6,7 @@ XRegrid recommends installation via `mamba` or `micromamba` for the most reliabl
 
 ```bash
 # Clone the repository
-git clone https://github.com/xregrid/xregrid.git
+git clone https://github.com/bbakernoaa/xregrid.git
 cd xregrid
 
 # Create the environment from the provided yaml file

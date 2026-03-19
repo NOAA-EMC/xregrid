@@ -3,8 +3,8 @@ site_name = "XRegrid Documentation"
 site_url = "https://bbakernoaa.github.io/xregrid"
 site_author = "XRegrid Contributors"
 site_description = "An optimized ESMF-based regridder for xarray"
-repo_name = "xregrid/xregrid"
-repo_url = "https://github.com/xregrid/xregrid"
+repo_name = "bbakernoaa/xregrid"
+repo_url = "https://github.com/bbakernoaa/xregrid"
 
 nav = [
     { "Home" = "index.md" },
@@ -85,4 +85,4 @@ version = { provider = "mike" }
 
 [[project.extra.social]]
 icon = "fontawesome/brands/github"
-link = "https://github.com/xregrid/xregrid"
+link = "https://github.com/bbakernoaa/xregrid"

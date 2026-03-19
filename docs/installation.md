@@ -10,7 +10,7 @@ The easiest way to install all dependencies, including `esmpy` and `xesmf`, is u
 
 ```bash
 # Clone the repository
-git clone https://github.com/xregrid/xregrid.git
+git clone https://github.com/bbakernoaa/xregrid.git
 cd xregrid
 
 # Create the environment from the provided yaml file
