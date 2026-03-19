@@ -91,7 +91,7 @@ xregrid input.nc 1.0 -o output.nc
 xregrid input.nc target_grid.nc --method conservative --dask-local 4 -o output.nc
 ```
 
-See the [CLI documentation](https://xregrid.readthedocs.io/user-guide/cli) for more details.
+See the [CLI documentation](https://bbakernoaa.github.io/xregrid/user-guide/cli) for more details.
 
 ## Installation
 
@@ -110,10 +110,10 @@ pip install .
 
 ## Documentation
 
-Full documentation is available at [https://xregrid.readthedocs.io/](https://xregrid.readthedocs.io/)
+Full documentation is available at [https://bbakernoaa.github.io/xregrid/](https://bbakernoaa.github.io/xregrid/)
 
-- [Quick Start Guide](https://xregrid.readthedocs.io/user-guide/quickstart)
-- [API Reference](https://xregrid.readthedocs.io/api/regridder)
+- [Quick Start Guide](https://bbakernoaa.github.io/xregrid/user-guide/quickstart)
+- [API Reference](https://bbakernoaa.github.io/xregrid/api/regridder)
 
 ## Contributing
 

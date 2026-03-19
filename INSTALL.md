@@ -24,8 +24,8 @@ If you are not using `mamba`/`conda`, you must ensure `esmpy` is installed manua
 
 ## Detailed Instructions
 
-For more detailed installation options, including building from source or handling specific platform requirements, please see our [Online Installation Guide](https://xregrid.readthedocs.io/installation).
+For more detailed installation options, including building from source or handling specific platform requirements, please see our [Online Installation Guide](https://bbakernoaa.github.io/xregrid/installation).
 
 ## Documentation
 
-Full documentation and examples are available at [https://xregrid.readthedocs.io/](https://xregrid.readthedocs.io/).
+Full documentation and examples are available at [https://bbakernoaa.github.io/xregrid/](https://bbakernoaa.github.io/xregrid/).
