@@ -10,7 +10,7 @@ The easiest way to install all dependencies, including `esmpy` and `xesmf`, is u
 
 ```bash
 # Clone the repository
-git clone https://github.com/xregrid/xregrid.git
+git clone https://github.com/bbakernoaa/xregrid.git
 cd xregrid
 
 # Create the environment from the provided yaml file
@@ -174,7 +174,7 @@ For large grids:
 
 ### Getting Help
 
-- Check the [Examples Gallery](examples/generated/index.md) for common use cases
+- Check the [Examples Gallery](examples/scripts/README.md) for common use cases
 - Review the [API documentation](api/regridder.md) for detailed parameter descriptions
 - Submit issues on GitHub for bugs or feature requests
 
