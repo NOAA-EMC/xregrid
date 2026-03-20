@@ -1384,3 +1384,133 @@ def spatial_slice(
     update_history(res, msg)
 
     return res
+
+
+def unstructured_to_scrip(ds: xr.Dataset) -> xr.Dataset:
+    """
+    Canonicalize an unstructured dataset (UGRID or MPAS) to SCRIP format.
+
+    Extracts connectivity information to build explicit boundary coordinates
+    (lat_b, lon_b) on a flat 'grid_size' dimension. This enables conservative
+    and bilinear regridding for unstructured grids that only provide connectivity.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The input unstructured dataset.
+
+    Returns
+    -------
+    xr.Dataset
+        A CF-compliant SCRIP-style dataset.
+    """
+    from .grid import _get_unstructured_mesh_info
+
+    # 1. Get centers via _find_coord (robust)
+    lat_c = _find_coord(ds, "latitude")
+    lon_c = _find_coord(ds, "longitude")
+
+    if lat_c is None or lon_c is None:
+        raise ValueError("Could not find latitude/longitude centers in dataset.")
+
+    # 2. Extract connectivity and vertices
+    try:
+        (
+            node_lon,
+            node_lat,
+            element_conn,
+            element_types,
+            element_ids,
+            orig_cell_index,
+        ) = _get_unstructured_mesh_info(ds, method="conservative")
+    except Exception as e:
+        raise ValueError(f"Failed to extract unstructured connectivity: {e}")
+
+    # 3. Reshape connectivity to SCRIP-style (N, 3 for triangles)
+    # _get_unstructured_mesh_info always triangulates.
+    n_tris = len(element_conn) // 3
+    conn_2d = element_conn.reshape(n_tris, 3)
+
+    # 4. Map nodes to corner coordinates
+    lat_b = node_lat[conn_2d]
+    lon_b = node_lon[conn_2d]
+
+    # 5. Handle mapping back to original cell centers if we triangulated a polygon grid
+    # If the original grid was polygons (MPAS, UGRID faces), we now have n_tris.
+    # We should probably map the original centers to the triangles if possible,
+    # or just use the triangle centers.
+    # For now, we return the triangulated mesh as the primary representation.
+
+    # 3. Ensure attributes are CF-compliant for centers
+    lat_attrs = lat_c.attrs.copy()
+    lon_attrs = lon_c.attrs.copy()
+    if "standard_name" not in lat_attrs:
+        lat_attrs["standard_name"] = "latitude"
+    if "standard_name" not in lon_attrs:
+        lon_attrs["standard_name"] = "longitude"
+    if "units" not in lat_attrs:
+        lat_attrs["units"] = "degrees_north"
+    if "units" not in lon_attrs:
+        lon_attrs["units"] = "degrees_east"
+
+    scrip_ds = xr.Dataset(
+        coords={
+            "lat": (
+                ["grid_size"],
+                lat_c.data[orig_cell_index]
+                if orig_cell_index is not None
+                else lat_c.data,
+                lat_attrs,
+            ),
+            "lon": (
+                ["grid_size"],
+                lon_c.data[orig_cell_index]
+                if orig_cell_index is not None
+                else lon_c.data,
+                lon_attrs,
+            ),
+            "lat_b": (
+                ["grid_size", "nv"],
+                lat_b,
+                {"units": "degrees_north", "standard_name": "latitude_bounds"},
+            ),
+            "lon_b": (
+                ["grid_size", "nv"],
+                lon_b,
+                {"units": "degrees_east", "standard_name": "longitude_bounds"},
+            ),
+        },
+        attrs=ds.attrs,
+    )
+
+    scrip_ds["lat"].attrs["bounds"] = "lat_b"
+    scrip_ds["lon"].attrs["bounds"] = "lon_b"
+
+    update_history(scrip_ds, "Canonicalized unstructured grid to SCRIP-style format.")
+
+    # Scientific Hygiene: add attributes that help regridder identify it as unstructured
+    scrip_ds["lat"].attrs["location"] = "face"
+    scrip_ds["lon"].attrs["location"] = "face"
+
+    return scrip_ds
+
+
+def mpas_to_scrip(ds: xr.Dataset) -> xr.Dataset:
+    """
+    Convert an MPAS-native dataset to a CF-compliant SCRIP-style format.
+
+    Alias for unstructured_to_scrip with MPAS-specific validation.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The MPAS dataset.
+
+    Returns
+    -------
+    xr.Dataset
+        SCRIP-style dataset.
+    """
+    if "nCells" not in ds.dims:
+        raise ValueError("Dataset does not appear to be an MPAS grid (missing nCells).")
+    return unstructured_to_scrip(ds)

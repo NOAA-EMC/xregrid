@@ -13,8 +13,6 @@ from xregrid.utils import update_history, get_crs_info
 from xregrid.grid import (
     _get_mesh_info,
     _get_non_spatial_dims,
-    _bounds_to_vertices,
-    _get_grid_bounds,
     _create_esmf_grid,
 )
 from xregrid.core import _apply_weights_core, _setup_worker_cache
@@ -219,8 +217,12 @@ class Regridder:
                 is_geographic = False
 
             # Determine if we have unstructured grids
-            _, _, _, _, is_unstructured_src = _get_mesh_info(source_grid_ds)
-            _, _, _, _, is_unstructured_tgt = _get_mesh_info(target_grid_ds)
+            _, _, _, _, is_unstructured_src = _get_mesh_info(
+                source_grid_ds, method=method, is_source=True
+            )
+            _, _, _, _, is_unstructured_tgt = _get_mesh_info(
+                target_grid_ds, method=method, is_source=False
+            )
 
             # Use SPH_DEG if:
             # 1. periodic=True
@@ -400,8 +402,12 @@ class Regridder:
             If the loaded weights do not match the current regridding configuration.
         """
         # Get current grid info
-        _, _, src_shape, src_dims, _ = self._get_mesh_info(self.source_grid_ds)
-        _, _, dst_shape, dst_dims, _ = self._get_mesh_info(self.target_grid_ds)
+        _, _, src_shape, src_dims, _ = _get_mesh_info(
+            self.source_grid_ds, method=self.method, is_source=True
+        )
+        _, _, dst_shape, dst_dims, _ = _get_mesh_info(
+            self.target_grid_ds, method=self.method, is_source=False
+        )
 
         if src_shape != self._shape_source:
             raise ValueError(
@@ -449,68 +455,6 @@ class Regridder:
                     f"loaded weights na_thres={self._loaded_na_thres}"
                 )
 
-    def _get_mesh_info(
-        self, ds: xr.Dataset
-    ) -> Tuple[xr.DataArray, xr.DataArray, Tuple[int, ...], Tuple[str, ...], bool]:
-        """
-        Instance-level wrapper for _get_mesh_info.
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            The dataset to inspect.
-
-        Returns
-        -------
-        lat : xr.DataArray
-            Latitude coordinate.
-        lon : xr.DataArray
-            Longitude coordinate.
-        shape : tuple of int
-            Grid shape.
-        dims : tuple of str
-            Spatial dimension names.
-        is_unstructured : bool
-            True if the grid is unstructured.
-        """
-        return _get_mesh_info(ds)
-
-    def _bounds_to_vertices(self, b: xr.DataArray) -> Union[xr.DataArray, np.ndarray]:
-        """
-        Instance-level wrapper for _bounds_to_vertices.
-
-        Parameters
-        ----------
-        b : xr.DataArray
-            The coordinate bounds.
-
-        Returns
-        -------
-        Union[xr.DataArray, np.ndarray]
-            The vertex coordinates.
-        """
-        return _bounds_to_vertices(b)
-
-    def _get_grid_bounds(
-        self, ds: xr.Dataset
-    ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-        """
-        Instance-level wrapper for _get_grid_bounds.
-
-        Parameters
-        ----------
-        ds : xr.Dataset
-            The dataset to inspect.
-
-        Returns
-        -------
-        lat_b : np.ndarray, optional
-            Latitude bounds.
-        lon_b : np.ndarray, optional
-            Longitude bounds.
-        """
-        return _get_grid_bounds(ds)
-
     def _create_esmf_object(
         self, ds: xr.Dataset, is_source: bool = True
     ) -> Tuple[Any, list[str], Optional[np.ndarray]]:
@@ -531,7 +475,7 @@ class Regridder:
         provenance : list of str
             Provenance messages from grid creation.
         """
-        lon, lat, shape, dims, is_unstructured = self._get_mesh_info(ds)
+        lon, lat, shape, dims, is_unstructured = _get_mesh_info(ds)
 
         if is_source:
             self._shape_source = shape
@@ -548,6 +492,7 @@ class Regridder:
             periodic=self.periodic if is_source else False,
             mask_var=self.mask_var if is_source else None,
             coord_sys=self._coord_sys,
+            is_source=is_source,
         )
 
     def _generate_weights(self) -> None:
@@ -728,16 +673,16 @@ class Regridder:
 
         # Get grid info and populate internal state
         # Source
-        _, _, src_shape, src_dims, is_unstructured_src = self._get_mesh_info(
-            self.source_grid_ds
+        _, _, src_shape, src_dims, is_unstructured_src = _get_mesh_info(
+            self.source_grid_ds, method=self.method, is_source=True
         )
         self._shape_source = src_shape
         self._dims_source = src_dims
         self._is_unstructured_src = is_unstructured_src
 
         # Target
-        _, _, dst_shape, dst_dims, is_unstructured_dst = self._get_mesh_info(
-            self.target_grid_ds
+        _, _, dst_shape, dst_dims, is_unstructured_dst = _get_mesh_info(
+            self.target_grid_ds, method=self.method, is_source=False
         )
         self._shape_target = dst_shape
         self._dims_target = dst_dims
@@ -1641,22 +1586,38 @@ class Regridder:
                 else:
                     # Unstructured: just one dimension
                     try:
-                        da_in = da_in.cf.rename(
-                            {da_in.cf["latitude"].dims[0]: self._dims_source[0]}
-                        )
-                    except (KeyError, AttributeError):
+                        # Prioritize explicit UGRID/MPAS/MUSICA dimensions if they exist
+                        unstructured_dims = [
+                            "ncol",
+                            "nCells",
+                            "nVertices",
+                            "nNodes",
+                            "nFaces",
+                            "nEdges",
+                            "grid_size",
+                            "n_face",
+                            "n_node",
+                            "n_edge",
+                        ]
+                        found_dim = None
+                        for d in da_in.dims:
+                            if d in unstructured_dims:
+                                found_dim = d
+                                break
+
+                        if found_dim:
+                            da_in = da_in.rename({found_dim: self._dims_source[0]})
+                        else:
+                            # Fallback to cf-xarray discovery
+                            da_in = da_in.cf.rename(
+                                {da_in.cf["latitude"].dims[0]: self._dims_source[0]}
+                            )
+                    except (KeyError, AttributeError, ValueError):
                         # Handle uxarray
                         if hasattr(da_in, "uxgrid"):
                             # Find the unstructured dimension
                             for d in da_in.dims:
-                                if d in [
-                                    "n_face",
-                                    "n_node",
-                                    "n_edge",
-                                    "nCells",
-                                    "nVertices",
-                                    "nEdges",
-                                ]:
+                                if d in unstructured_dims:
                                     da_in = da_in.rename({d: self._dims_source[0]})
                                     break
             except (KeyError, AttributeError, ValueError):

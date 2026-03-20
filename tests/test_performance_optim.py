@@ -96,9 +96,8 @@ def test_dask_stationary_mask_caching():
 
         # Mock Regridder internally
         with patch.object(Regridder, "_generate_weights", return_value=None):
-            with patch.object(
-                Regridder,
-                "_get_mesh_info",
+            with patch(
+                "xregrid.regridder._get_mesh_info",
                 side_effect=[
                     (MockObj("src"), ["src"], (4, 4), ("lat", "lon"), False),
                     (MockObj("dst"), ["dst"], (2, 2), ("lat", "lon"), False),
