@@ -637,12 +637,7 @@ def _get_unstructured_mesh_info(
             elif "lat_node" in ds:
                 node_lat_var = "lat_node"
 
-        if (
-            node_lon_var
-            and node_lat_var
-            and node_lon_var in ds
-            and node_lat_var in ds
-        ):
+        if node_lon_var and node_lat_var and node_lon_var in ds and node_lat_var in ds:
             v_lon = ds[node_lon_var]
             v_lat = ds[node_lat_var]
             v_conn = ds[conn_var]
