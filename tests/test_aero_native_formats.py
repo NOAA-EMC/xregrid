@@ -21,7 +21,8 @@ def test_musica_cesm_regrid_aero():
     ds_tgt = create_global_grid(10, 20)
 
     # 3. Initialize Regridder (should detect unstructured ncol)
-    regridder = Regridder(ds_src, ds_tgt, method="bilinear")
+    # Using nearest_s2d because ncol has no connectivity info
+    regridder = Regridder(ds_src, ds_tgt, method="nearest_s2d")
     assert regridder._is_unstructured_src
     assert regridder._dims_source == ("ncol",)
 
@@ -56,7 +57,8 @@ def test_mpas_regrid_aero():
 
     ds_tgt = create_global_grid(10, 20)
 
-    regridder = Regridder(ds_src, ds_tgt, method="bilinear")
+    # Using nearest_s2d because nCells has no connectivity info in this test
+    regridder = Regridder(ds_src, ds_tgt, method="nearest_s2d")
     assert regridder._is_unstructured_src
     assert regridder._dims_source == ("nCells",)
 
@@ -97,7 +99,8 @@ def test_ugrid_discovery_aero():
     # OR because they have standard names and 'node' in name.
 
     ds_tgt = create_global_grid(10, 20)
-    regridder = Regridder(ds, ds_tgt, method="bilinear")
+    # Using nearest_s2d because this UGRID has no connectivity info
+    regridder = Regridder(ds, ds_tgt, method="nearest_s2d")
     assert regridder._is_unstructured_src
     assert regridder._dims_source == ("node",)
 
@@ -143,6 +146,27 @@ def test_scrip_conservative_regrid_aero():
 
     out = regridder(ds_src)
     assert "temp" in out
+
+
+def test_mpas_non_conservative_discovery_aero():
+    """Verify MPAS (nCells) non-conservative discovery (triggers optimized path)."""
+    n_cells = 50
+    ds_src = xr.Dataset(
+        data_vars={"temp": (["nCells"], np.random.rand(n_cells))},
+        coords={
+            "lat": (["nCells"], np.linspace(-90, 90, n_cells)),
+            "lon": (["nCells"], np.linspace(0, 350, n_cells)),
+        },
+    )
+    ds_tgt = create_global_grid(10, 20)
+
+    # This should trigger the optimized section 2 in _get_unstructured_mesh_info
+    regridder = Regridder(ds_src, ds_tgt, method="nearest_s2d")
+    assert regridder._is_unstructured_src
+    assert regridder._dims_source == ("nCells",)
+
+    out = regridder(ds_src)
+    assert out.temp.dims == ("lat", "lon")
 
 
 if __name__ == "__main__":

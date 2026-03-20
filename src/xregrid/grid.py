@@ -182,6 +182,11 @@ def _get_mesh_info(
         "nNodes",
         "nFaces",
         "nEdges",
+        "node",
+        "face",
+        "vertex",
+        "cell",
+        "n_pts",
     }
 
     if "mesh" in lat.attrs and "location" in lat.attrs:
@@ -530,38 +535,35 @@ def _get_unstructured_mesh_info(
             orig_cell_index.astype(np.int32),
         )
 
-    # 2. Detect CAM-SE (ncol format)
-    # CAM-SE often has (lat, lon) on dimension 'ncol'.
-    # MUSICA / CESM often use this format.
-    if (
-        "lat" in ds
-        and "lon" in ds
-        and ("ncol" in ds.dims or "ncol" in ds["lat"].dims)
-        and method != "conservative"
-    ):
-        # CAM-SE non-conservative regridding only needs node locations
-        v_lat = ds["lat"]
-        v_lon = ds["lon"]
+    # 2. Detect native model formats for non-conservative regridding
+    # (MUSICA/CESM 'ncol', MPAS 'nCells', etc.)
+    # These only need node locations for ESMF LocStream regridding.
+    if method not in ["conservative", "bilinear", "patch"]:
+        v_lat = _find_coord(ds, "latitude")
+        v_lon = _find_coord(ds, "longitude")
 
-        # Filter out non-spatial dimensions
-        for da in [v_lat, v_lon]:
-            isel_dict = {d: 0 for d in non_spatial_dims if d in da.dims}
-            if isel_dict:
-                if da is v_lat:
-                    v_lat = v_lat.isel(isel_dict, drop=True)
-                elif da is v_lon:
-                    v_lon = v_lon.isel(isel_dict, drop=True)
+        if v_lat is not None and v_lon is not None:
+            # Check if they share a single dimension (unstructured)
+            if v_lat.dims == v_lon.dims and len(v_lat.dims) == 1:
+                # Filter out non-spatial dimensions (Time, Z)
+                for da in [v_lat, v_lon]:
+                    isel_dict = {d: 0 for d in non_spatial_dims if d in da.dims}
+                    if isel_dict:
+                        if da is v_lat:
+                            v_lat = v_lat.isel(isel_dict, drop=True)
+                        elif da is v_lon:
+                            v_lon = v_lon.isel(isel_dict, drop=True)
 
-        node_lat = _clip_latitudes(_to_degrees(v_lat)).values
-        node_lon = _normalize_longitudes(_to_degrees(v_lon)).values
-        return (
-            node_lon,
-            node_lat,
-            np.array([], dtype=np.int32),
-            np.array([], dtype=np.int32),
-            np.array([], dtype=np.int32),
-            None,
-        )
+                node_lat = _clip_latitudes(_to_degrees(v_lat)).values
+                node_lon = _normalize_longitudes(_to_degrees(v_lon)).values
+                return (
+                    node_lon,
+                    node_lat,
+                    np.array([], dtype=np.int32),
+                    np.array([], dtype=np.int32),
+                    np.array([], dtype=np.int32),
+                    None,
+                )
 
     # 3. Detect SCRIP Unstructured
     if "lat_b" in ds and "lon_b" in ds and ds["lat_b"].ndim == 2:
@@ -847,10 +849,11 @@ def _create_esmf_grid(
                     raise
                 # Fall through to LocStream or NotImplementedError
 
-        if method not in ["nearest_s2d", "nearest_d2s", "bilinear", "patch"]:
+        if method not in ["nearest_s2d", "nearest_d2s"]:
             raise NotImplementedError(
-                f"Method '{method}' is not yet supported for unstructured grids without connectivity info. "
-                "Use 'nearest_s2d', 'nearest_d2s', 'bilinear' or 'patch' (as target) or ensure your dataset has UGRID/MPAS mesh info for 'conservative'."
+                f"Method '{method}' requires connectivity information (UGRID, MPAS, or derived from SCRIP-style bounds) for unstructured grids. "
+                "For grids without connectivity, please use 'nearest_s2d' or 'nearest_d2s' (which utilize LocStreams), "
+                "or ensure your source data includes CF-compliant bounds to trigger automatic connectivity derivation."
             )
         locstream = esmpy.LocStream(shape[0], coord_sys=coord_sys)
         if coord_sys == esmpy.CoordSys.CART:
