@@ -940,6 +940,10 @@ def _create_esmf_grid(
             try:
                 ds_with_bounds = ds.cf.add_bounds(["latitude", "longitude"])
                 lat_b, lon_b = _get_grid_bounds(ds_with_bounds)
+                if lat_b is not None and lon_b is not None:
+                    provenance.append(
+                        f"Automatically generated cell boundaries for {method} regridding."
+                    )
             except Exception:
                 pass
 
