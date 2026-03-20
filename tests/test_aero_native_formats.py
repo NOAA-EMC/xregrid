@@ -1,0 +1,149 @@
+import numpy as np
+import pytest
+import xarray as xr
+from xregrid import Regridder
+from xregrid.utils import create_global_grid
+
+
+def test_musica_cesm_regrid_aero():
+    """Verify MUSICA/CESM (ncol) grid discovery and regridding (Aero Protocol)."""
+    # 1. Create MUSICA-like source grid (unstructured ncol)
+    n_col = 100
+    ds_src = xr.Dataset(
+        data_vars={"temp": (["ncol"], np.random.rand(n_col))},
+        coords={
+            "lat": (["ncol"], np.linspace(-90, 90, n_col)),
+            "lon": (["ncol"], np.linspace(0, 350, n_col)),
+        },
+    )
+
+    # 2. Create target rectilinear grid
+    ds_tgt = create_global_grid(10, 20)
+
+    # 3. Initialize Regridder (should detect unstructured ncol)
+    regridder = Regridder(ds_src, ds_tgt, method="bilinear")
+    assert regridder._is_unstructured_src
+    assert regridder._dims_source == ("ncol",)
+
+    # 4. Double-Check: Eager
+    out_eager = regridder(ds_src)
+    assert isinstance(out_eager, xr.Dataset)
+    assert "temp" in out_eager
+    assert out_eager.temp.dims == ("lat", "lon")
+
+    # 5. Double-Check: Lazy
+    ds_src_lazy = ds_src.chunk({"ncol": 10})
+    out_lazy = regridder(ds_src_lazy)
+    assert hasattr(out_lazy.temp.data, "dask")
+
+    xr.testing.assert_allclose(out_eager, out_lazy.compute())
+
+
+def test_mpas_regrid_aero():
+    """Verify MPAS (nCells) grid discovery and regridding (Aero Protocol)."""
+    n_cells = 100
+    ds_src = xr.Dataset(
+        data_vars={"temp": (["nCells"], np.random.rand(n_cells))},
+        coords={
+            "latCell": (["nCells"], np.linspace(-90, 90, n_cells)),
+            "lonCell": (["nCells"], np.linspace(0, 350, n_cells)),
+        },
+    )
+    # CF-Xarray might not know latCell/lonCell without attributes,
+    # but xregrid fallback should find them.
+    ds_src.latCell.attrs["standard_name"] = "latitude"
+    ds_src.lonCell.attrs["standard_name"] = "longitude"
+
+    ds_tgt = create_global_grid(10, 20)
+
+    regridder = Regridder(ds_src, ds_tgt, method="bilinear")
+    assert regridder._is_unstructured_src
+    assert regridder._dims_source == ("nCells",)
+
+    out_eager = regridder(ds_src)
+    assert out_eager.temp.dims == ("lat", "lon")
+
+    ds_src_lazy = ds_src.chunk({"nCells": 10})
+    out_lazy = regridder(ds_src_lazy)
+    xr.testing.assert_allclose(out_eager, out_lazy.compute())
+
+
+def test_ugrid_discovery_aero():
+    """Verify UGRID-compliant discovery with explicit mesh topology."""
+    n_nodes = 50
+    ds = xr.Dataset(
+        data_vars={
+            "temp": (["node"], np.random.rand(n_nodes)),
+            "mesh": (
+                [],
+                0,
+                {"cf_role": "mesh_topology", "node_coordinates": "lon_node lat_node"},
+            ),
+        },
+        coords={
+            "lat_node": (
+                ["node"],
+                np.linspace(-90, 90, n_nodes),
+                {"standard_name": "latitude"},
+            ),
+            "lon_node": (
+                ["node"],
+                np.linspace(0, 360, n_nodes),
+                {"standard_name": "longitude"},
+            ),
+        },
+    )
+    # The new logic should prefer lat_node/lon_node because they are linked in 'mesh'
+    # OR because they have standard names and 'node' in name.
+
+    ds_tgt = create_global_grid(10, 20)
+    regridder = Regridder(ds, ds_tgt, method="bilinear")
+    assert regridder._is_unstructured_src
+    assert regridder._dims_source == ("node",)
+
+    out = regridder(ds)
+    assert out.temp.dims == ("lat", "lon")
+
+
+def test_scrip_conservative_regrid_aero():
+    """Verify SCRIP-style unstructured grid handles conservative regridding via derived connectivity."""
+    n_cells = 10
+    # Create SCRIP-like 2D bounds (n_cells, 4 corners)
+    lat_b = np.array(
+        [
+            [-10, -10, 10, 10],
+            [-10, -10, 10, 10],
+            # ... just a few for testing
+        ]
+    )
+    lat_b = np.repeat(lat_b, n_cells // 2, axis=0)
+    lon_b = np.array(
+        [
+            [0, 10, 10, 0],
+            [10, 20, 20, 10],
+        ]
+    )
+    lon_b = np.repeat(lon_b, n_cells // 2, axis=0)
+
+    ds_src = xr.Dataset(
+        data_vars={"temp": (["grid_size"], np.random.rand(n_cells))},
+        coords={
+            "lat": (["grid_size"], np.zeros(n_cells)),
+            "lon": (["grid_size"], np.zeros(n_cells)),
+            "lat_b": (["grid_size", "nv"], lat_b),
+            "lon_b": (["grid_size", "nv"], lon_b),
+        },
+    )
+
+    ds_tgt = create_global_grid(10, 10)
+
+    # conservative requires bounds
+    regridder = Regridder(ds_src, ds_tgt, method="conservative")
+    assert regridder._is_unstructured_src
+
+    out = regridder(ds_src)
+    assert "temp" in out
+
+
+if __name__ == "__main__":
+    pytest.main([__file__])

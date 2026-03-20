@@ -1641,22 +1641,38 @@ class Regridder:
                 else:
                     # Unstructured: just one dimension
                     try:
-                        da_in = da_in.cf.rename(
-                            {da_in.cf["latitude"].dims[0]: self._dims_source[0]}
-                        )
-                    except (KeyError, AttributeError):
+                        # Prioritize explicit UGRID/MPAS/MUSICA dimensions if they exist
+                        unstructured_dims = [
+                            "ncol",
+                            "nCells",
+                            "nVertices",
+                            "nNodes",
+                            "nFaces",
+                            "nEdges",
+                            "grid_size",
+                            "n_face",
+                            "n_node",
+                            "n_edge",
+                        ]
+                        found_dim = None
+                        for d in da_in.dims:
+                            if d in unstructured_dims:
+                                found_dim = d
+                                break
+
+                        if found_dim:
+                            da_in = da_in.rename({found_dim: self._dims_source[0]})
+                        else:
+                            # Fallback to cf-xarray discovery
+                            da_in = da_in.cf.rename(
+                                {da_in.cf["latitude"].dims[0]: self._dims_source[0]}
+                            )
+                    except (KeyError, AttributeError, ValueError):
                         # Handle uxarray
                         if hasattr(da_in, "uxgrid"):
                             # Find the unstructured dimension
                             for d in da_in.dims:
-                                if d in [
-                                    "n_face",
-                                    "n_node",
-                                    "n_edge",
-                                    "nCells",
-                                    "nVertices",
-                                    "nEdges",
-                                ]:
+                                if d in unstructured_dims:
                                     da_in = da_in.rename({d: self._dims_source[0]})
                                     break
             except (KeyError, AttributeError, ValueError):

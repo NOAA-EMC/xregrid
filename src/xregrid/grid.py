@@ -172,17 +172,25 @@ def _get_mesh_info(
         lon = lon.isel(lon_isel, drop=True)
 
     # UGRID: Check for 'mesh' and 'location' attributes or topology to confirm unstructured
-    # Also check for common atmospheric model dimensions like 'ncol'
+    # Also check for common atmospheric model dimensions like 'ncol' (CAM-SE), 'nCells' (MPAS)
     is_unstructured_fmt = False
+    unstructured_dims = {
+        "ncol",
+        "grid_size",
+        "nCells",
+        "nVertices",
+        "nNodes",
+        "nFaces",
+        "nEdges",
+    }
+
     if "mesh" in lat.attrs and "location" in lat.attrs:
         is_unstructured_fmt = True
     elif "mesh" in lon.attrs and "location" in lon.attrs:
         is_unstructured_fmt = True
-    elif "ncol" in lat.dims or "ncol" in ds.dims:
-        # Common CAM-SE / MUSICA dimension
-        is_unstructured_fmt = True
-    elif "grid_size" in lat.dims or "grid_size" in ds.dims:
-        # Common SCRIP dimension
+    elif any(d in lat.dims for d in unstructured_dims) or any(
+        d in ds.dims for d in unstructured_dims
+    ):
         is_unstructured_fmt = True
     else:
         for var in ds.variables:
@@ -524,6 +532,7 @@ def _get_unstructured_mesh_info(
 
     # 2. Detect CAM-SE (ncol format)
     # CAM-SE often has (lat, lon) on dimension 'ncol'.
+    # MUSICA / CESM often use this format.
     if (
         "lat" in ds
         and "lon" in ds
@@ -531,12 +540,20 @@ def _get_unstructured_mesh_info(
         and method != "conservative"
     ):
         # CAM-SE non-conservative regridding only needs node locations
-        # We return empty connectivity because it's not strictly required for LocStream
-        # but _get_unstructured_mesh_info is used for Mesh creation.
-        # If method is not conservative, _create_esmf_grid will fallback to LocStream
-        # if Mesh creation fails. However, we can try to provide minimal mesh info.
-        node_lat = _clip_latitudes(_to_degrees(ds["lat"])).values
-        node_lon = _normalize_longitudes(_to_degrees(ds["lon"])).values
+        v_lat = ds["lat"]
+        v_lon = ds["lon"]
+
+        # Filter out non-spatial dimensions
+        for da in [v_lat, v_lon]:
+            isel_dict = {d: 0 for d in non_spatial_dims if d in da.dims}
+            if isel_dict:
+                if da is v_lat:
+                    v_lat = v_lat.isel(isel_dict, drop=True)
+                elif da is v_lon:
+                    v_lon = v_lon.isel(isel_dict, drop=True)
+
+        node_lat = _clip_latitudes(_to_degrees(v_lat)).values
+        node_lon = _normalize_longitudes(_to_degrees(v_lon)).values
         return (
             node_lon,
             node_lat,
@@ -546,7 +563,70 @@ def _get_unstructured_mesh_info(
             None,
         )
 
-    # 3. Detect UGRID (Standard Compliance)
+    # 3. Detect SCRIP Unstructured
+    if "lat_b" in ds and "lon_b" in ds and ds["lat_b"].ndim == 2:
+        # SCRIP unstructured often renamed by load_esmf_file
+        # or original SCRIP with grid_corner_lat/lon
+        v_lat_b = ds["lat_b"]
+        v_lon_b = ds["lon_b"]
+
+        # Filter out non-spatial dimensions
+        for da in [v_lat_b, v_lon_b]:
+            isel_dict = {d: 0 for d in non_spatial_dims if d in da.dims}
+            if isel_dict:
+                if da is v_lat_b:
+                    v_lat_b = v_lat_b.isel(isel_dict, drop=True)
+                elif da is v_lon_b:
+                    v_lon_b = v_lon_b.isel(isel_dict, drop=True)
+
+        # For SCRIP, we can derive unique nodes and connectivity
+        # to support conservative regridding.
+        n_cells, n_corners = v_lat_b.shape
+        flat_lat = _clip_latitudes(_to_degrees(v_lat_b)).values.flatten()
+        flat_lon = _normalize_longitudes(_to_degrees(v_lon_b)).values.flatten()
+
+        # Identify unique nodes to build a proper Mesh
+        coords = np.column_stack([flat_lon, flat_lat])
+        # Round to avoid precision issues in unique
+        coords_rounded = np.round(coords, 8)
+        _, unique_indices, inverse_indices = np.unique(
+            coords_rounded, axis=0, return_index=True, return_inverse=True
+        )
+
+        node_lon = flat_lon[unique_indices]
+        node_lat = flat_lat[unique_indices]
+
+        # Connectivity is just the inverse indices reshaped
+        conn_raw = inverse_indices.reshape(n_cells, n_corners)
+
+        # Triangulate
+        max_tris = n_corners - 2
+        j = np.arange(1, max_tris + 1)
+        mask = np.ones(
+            (n_cells, max_tris), dtype=bool
+        )  # All tris valid for fixed-corner SCRIP
+
+        v0 = np.repeat(conn_raw[:, 0:1], max_tris, axis=1)
+        v1 = conn_raw[:, 1:-1]
+        v2 = conn_raw[:, 2:]
+
+        element_conn = np.stack([v0, v1, v2], axis=2).reshape(-1, 3)
+        orig_cell_index = np.repeat(np.arange(n_cells), max_tris)
+
+        n_tris = len(element_conn)
+        element_types = np.full(n_tris, esmpy.MeshElemType.TRI, dtype=np.int32)
+        element_ids = np.arange(1, n_tris + 1, dtype=np.int32)
+
+        return (
+            node_lon,
+            node_lat,
+            element_conn.flatten().astype(np.int32),
+            element_types,
+            element_ids,
+            orig_cell_index.astype(np.int32),
+        )
+
+    # 4. Detect UGRID (Standard Compliance)
     mesh_var = None
     for var in ds.variables:
         if ds[var].attrs.get("cf_role") == "mesh_topology":
@@ -589,9 +669,16 @@ def _get_unstructured_mesh_info(
                     "node" in v.lower() or attrs.get("location") == "node"
                 ):
                     node_lon_var = v
+                elif attrs.get("standard_name") == "longitude" and node_lon_var is None:
+                    # Fallback for UGRID files where location=node might be missing
+                    node_lon_var = v
+
                 if attrs.get("standard_name") == "latitude" and (
                     "node" in v.lower() or attrs.get("location") == "node"
                 ):
+                    node_lat_var = v
+                elif attrs.get("standard_name") == "latitude" and node_lat_var is None:
+                    # Fallback for UGRID files where location=node might be missing
                     node_lat_var = v
 
         if not node_lon_var:
