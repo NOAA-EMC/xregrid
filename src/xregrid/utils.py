@@ -1386,113 +1386,131 @@ def spatial_slice(
     return res
 
 
-def mpas_to_scrip(ds: xr.Dataset) -> xr.Dataset:
+def unstructured_to_scrip(ds: xr.Dataset) -> xr.Dataset:
     """
-    Convert an MPAS-native dataset to a CF-compliant SCRIP-style format.
+    Canonicalize an unstructured dataset (UGRID or MPAS) to SCRIP format.
 
-    Extracts cell centers and vertex coordinates, using the connectivity
-    information to build explicit boundary coordinates (lat_b, lon_b).
-    This enables conservative regridding for MPAS grids.
+    Extracts connectivity information to build explicit boundary coordinates
+    (lat_b, lon_b) on a flat 'grid_size' dimension. This enables conservative
+    and bilinear regridding for unstructured grids that only provide connectivity.
 
     Parameters
     ----------
     ds : xr.Dataset
-        The MPAS dataset containing 'latCell', 'lonCell', 'latVertex',
-        'lonVertex', and 'verticesOnCell'.
+        The input unstructured dataset.
 
     Returns
     -------
     xr.Dataset
-        A new dataset with 'lat', 'lon', 'lat_b', and 'lon_b' coordinates
-        on the 'grid_size' dimension.
+        A CF-compliant SCRIP-style dataset.
     """
-    # 1. Identify required variables
+    from .grid import _get_unstructured_mesh_info
+
+    # 1. Get centers via _find_coord (robust)
+    lat_c = _find_coord(ds, "latitude")
+    lon_c = _find_coord(ds, "longitude")
+
+    if lat_c is None or lon_c is None:
+        raise ValueError("Could not find latitude/longitude centers in dataset.")
+
+    # 2. Extract connectivity and vertices
     try:
-        lat_cell = ds["latCell"]
-        lon_cell = ds["lonCell"]
-        lat_vertex = ds["latVertex"]
-        lon_vertex = ds["lonVertex"]
-        v_on_cell = ds["verticesOnCell"]
-    except KeyError as e:
-        raise KeyError(f"MPAS dataset missing required variable: {e}")
+        (
+            node_lon,
+            node_lat,
+            element_conn,
+            element_types,
+            element_ids,
+            orig_cell_index,
+        ) = _get_unstructured_mesh_info(ds, method="conservative")
+    except Exception as e:
+        raise ValueError(f"Failed to extract unstructured connectivity: {e}")
 
-    # 2. Convert radians to degrees if necessary
-    def _ensure_degrees(da):
-        if da.attrs.get("units") in ["radian", "radians", "rad"]:
-            return da * 180.0 / np.pi
-        return da
+    # 3. Reshape connectivity to SCRIP-style (N, 3 for triangles)
+    # _get_unstructured_mesh_info always triangulates.
+    n_tris = len(element_conn) // 3
+    conn_2d = element_conn.reshape(n_tris, 3)
 
-    lat_c = _ensure_degrees(lat_cell)
-    lon_c = _ensure_degrees(lon_cell)
-    lat_v = _ensure_degrees(lat_vertex)
-    lon_v = _ensure_degrees(lon_vertex)
+    # 4. Map nodes to corner coordinates
+    lat_b = node_lat[conn_2d]
+    lon_b = node_lon[conn_2d]
 
-    # 3. Handle connectivity (MPAS is 1-based)
-    # verticesOnCell is (nCells, maxEdges)
-    # Identify dimensions
-    nv_dim = v_on_cell.dims[1]
-    vertex_dim = lat_v.dims[0]
+    # 5. Handle mapping back to original cell centers if we triangulated a polygon grid
+    # If the original grid was polygons (MPAS, UGRID faces), we now have n_tris.
+    # We should probably map the original centers to the triangles if possible,
+    # or just use the triangle centers.
+    # For now, we return the triangulated mesh as the primary representation.
 
-    v_idx = v_on_cell - 1
+    # 3. Ensure attributes are CF-compliant for centers
+    lat_attrs = lat_c.attrs.copy()
+    lon_attrs = lon_c.attrs.copy()
+    if "standard_name" not in lat_attrs:
+        lat_attrs["standard_name"] = "latitude"
+    if "standard_name" not in lon_attrs:
+        lon_attrs["standard_name"] = "longitude"
+    if "units" not in lat_attrs:
+        lat_attrs["units"] = "degrees_north"
+    if "units" not in lon_attrs:
+        lon_attrs["units"] = "degrees_east"
 
-    def _map_vertices(indices, coords):
-        # indices: (N, K), coords: (M,) -> result: (N, K)
-        # Handle padding: MPAS uses 0 for padding in 1-based, becomes -1 here
-        mask = indices >= 0
-        # Use a safe index for padding, we will mask it later if needed
-        # but for SCRIP-style bounds, ESMF handles fixed-size corner arrays.
-        safe_indices = np.where(mask, indices, 0)
-        out = coords[safe_indices]
-        return out
-
-    lat_b_data = xr.apply_ufunc(
-        _map_vertices,
-        v_idx,
-        lat_v,
-        dask="parallelized",
-        output_dtypes=[lat_v.dtype],
-        input_core_dims=[[nv_dim], [vertex_dim]],
-        output_core_dims=[[nv_dim]],
-    )
-
-    lon_b_data = xr.apply_ufunc(
-        _map_vertices,
-        v_idx,
-        lon_v,
-        dask="parallelized",
-        output_dtypes=[lon_v.dtype],
-        input_core_dims=[[nv_dim], [vertex_dim]],
-        output_core_dims=[[nv_dim]],
-    )
-
-    # Create the SCRIP-style dataset
-    # Map MPAS dimensions to standard SCRIP names
     scrip_ds = xr.Dataset(
         coords={
-            "lat": (["grid_size"], lat_c.data, lat_c.attrs),
-            "lon": (["grid_size"], lon_c.data, lon_c.attrs),
+            "lat": (
+                ["grid_size"],
+                lat_c.data[orig_cell_index]
+                if orig_cell_index is not None
+                else lat_c.data,
+                lat_attrs,
+            ),
+            "lon": (
+                ["grid_size"],
+                lon_c.data[orig_cell_index]
+                if orig_cell_index is not None
+                else lon_c.data,
+                lon_attrs,
+            ),
             "lat_b": (
                 ["grid_size", "nv"],
-                lat_b_data.data,
+                lat_b,
                 {"units": "degrees_north", "standard_name": "latitude_bounds"},
             ),
             "lon_b": (
                 ["grid_size", "nv"],
-                lon_b_data.data,
+                lon_b,
                 {"units": "degrees_east", "standard_name": "longitude_bounds"},
             ),
         },
         attrs=ds.attrs,
     )
 
-    # Link bounds
     scrip_ds["lat"].attrs["bounds"] = "lat_b"
     scrip_ds["lon"].attrs["bounds"] = "lon_b"
 
-    # Add standard names if missing
-    scrip_ds["lat"].attrs["standard_name"] = "latitude"
-    scrip_ds["lon"].attrs["standard_name"] = "longitude"
+    update_history(scrip_ds, "Canonicalized unstructured grid to SCRIP-style format.")
 
-    update_history(scrip_ds, "Converted from MPAS-native to SCRIP-style format.")
+    # Scientific Hygiene: add attributes that help regridder identify it as unstructured
+    scrip_ds["lat"].attrs["location"] = "face"
+    scrip_ds["lon"].attrs["location"] = "face"
 
     return scrip_ds
+
+
+def mpas_to_scrip(ds: xr.Dataset) -> xr.Dataset:
+    """
+    Convert an MPAS-native dataset to a CF-compliant SCRIP-style format.
+
+    Alias for unstructured_to_scrip with MPAS-specific validation.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The MPAS dataset.
+
+    Returns
+    -------
+    xr.Dataset
+        SCRIP-style dataset.
+    """
+    if "nCells" not in ds.dims:
+        raise ValueError("Dataset does not appear to be an MPAS grid (missing nCells).")
+    return unstructured_to_scrip(ds)

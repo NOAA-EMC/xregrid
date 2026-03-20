@@ -9,14 +9,14 @@ import xarray as xr
 from .utils import _find_coord
 
 
-def _get_non_spatial_dims(ds: xr.Dataset) -> set[str]:
+def _get_non_spatial_dims(ds: Union[xr.Dataset, xr.DataArray]) -> set[str]:
     """
     Identify dimensions that are likely not spatial (Time, Vertical).
 
     Parameters
     ----------
-    ds : xr.Dataset
-        The dataset to inspect.
+    ds : xr.Dataset or xr.DataArray
+        The object to inspect.
 
     Returns
     -------
@@ -56,8 +56,8 @@ def _get_non_spatial_dims(ds: xr.Dataset) -> set[str]:
             non_spatial_dims.add(str(dim))
 
         # 3. Dtype check for time if it's a coordinate
-        if dim in ds.coords:
-            dtype = ds[dim].dtype
+        if hasattr(ds, "coords") and dim in ds.coords:
+            dtype = ds.coords[dim].dtype
             if np.issubdtype(dtype, np.datetime64) or np.issubdtype(
                 dtype, np.timedelta64
             ):
@@ -98,7 +98,6 @@ def _get_mesh_info(
         If coordinates have invalid dimensionality.
     """
     # Identify and filter out non-spatial dimensions (Time, Z)
-    #
     non_spatial_dims = _get_non_spatial_dims(ds)
 
     # Handle uxarray objects
@@ -214,16 +213,30 @@ def _get_mesh_info(
             lon = lon.transpose(*lat.dims)
         return lon, lat, lat.shape, lat.dims, False
     elif lat.ndim == 1:
-        if lat.dims == lon.dims or is_unstructured_fmt:
-            # Unstructured (e.g. MPAS, UGRID, or CAM-SE)
+        # Shared 1D dimension => Unstructured
+        if lat.dims == lon.dims:
+            return lon, lat, lat.shape, lat.dims, True
+        elif is_unstructured_fmt:
+            # Check if it's really unstructured or just missing one dimension of a rectilinear grid
+            # If lat and lon have different 1D dimensions, it's likely rectilinear unless explicitly forced
+            if len(lat.dims) == 1 and len(lon.dims) == 1 and lat.dims != lon.dims:
+                # Rectilinear path
+                lon_mesh, lat_mesh = xr.broadcast(lon, lat)
+                lon_mesh = lon_mesh.transpose(lat.dims[0], lon.dims[0])
+                lat_mesh = lat_mesh.transpose(lat.dims[0], lon.dims[0])
+                return (
+                    lon_mesh,
+                    lat_mesh,
+                    (lat.size, lon.size),
+                    (lat.dims[0], lon.dims[0]),
+                    False,
+                )
             return lon, lat, lat.shape, lat.dims, True
         else:
             # Rectilinear
             lon_mesh, lat_mesh = xr.broadcast(lon, lat)
 
-            # Transpose to standard (lat, lon) order if needed
-            # For 1D lat/lon, they are broadcasted to (lat, lon) or (lon, lat)
-            # based on order in xr.broadcast. We enforce (lat, lon) here.
+            # Transpose to (lat, lon) order
             lon_mesh = lon_mesh.transpose(lat.dims[0], lon.dims[0])
             lat_mesh = lat_mesh.transpose(lat.dims[0], lon.dims[0])
 
@@ -666,8 +679,6 @@ def _get_unstructured_mesh_info(
 
     # 3. Detect SCRIP Unstructured
     if "lat_b" in ds and "lon_b" in ds and ds["lat_b"].ndim == 2:
-        # SCRIP unstructured often renamed by load_esmf_file
-        # or original SCRIP with grid_corner_lat/lon
         v_lat_b = ds["lat_b"]
         v_lon_b = ds["lon_b"]
 
@@ -681,15 +692,12 @@ def _get_unstructured_mesh_info(
                 elif da is v_lon_b:
                     v_lon_b = v_lon_b.isel(isel_dict, drop=True)
 
-        # For SCRIP, we can derive unique nodes and connectivity
-        # to support conservative regridding.
         n_cells, n_corners = v_lat_b.shape
         flat_lat = _clip_latitudes(_to_degrees(v_lat_b)).values.flatten()
         flat_lon = _normalize_longitudes(_to_degrees(v_lon_b)).values.flatten()
 
-        # Identify unique nodes to build a proper Mesh
+        # Identify unique nodes
         coords = np.column_stack([flat_lon, flat_lat])
-        # Round to avoid precision issues in unique
         coords_rounded = np.round(coords, 8)
         _, unique_indices, inverse_indices = np.unique(
             coords_rounded, axis=0, return_index=True, return_inverse=True
@@ -697,17 +705,10 @@ def _get_unstructured_mesh_info(
 
         node_lon = flat_lon[unique_indices]
         node_lat = flat_lat[unique_indices]
-
-        # Connectivity is just the inverse indices reshaped
         conn_raw = inverse_indices.reshape(n_cells, n_corners)
 
         # Triangulate
         max_tris = n_corners - 2
-        j = np.arange(1, max_tris + 1)
-        mask = np.ones(
-            (n_cells, max_tris), dtype=bool
-        )  # All tris valid for fixed-corner SCRIP
-
         v0 = np.repeat(conn_raw[:, 0:1], max_tris, axis=1)
         v1 = conn_raw[:, 1:-1]
         v2 = conn_raw[:, 2:]
@@ -729,15 +730,12 @@ def _get_unstructured_mesh_info(
         )
 
     # 4. Fallback for non-conservative regridding (LocStreams)
-    # These only need node locations, supporting ncol, nCells, etc. natively.
     if method not in ["conservative", "bilinear", "patch"]:
         v_lat = _find_coord(ds, "latitude")
         v_lon = _find_coord(ds, "longitude")
 
         if v_lat is not None and v_lon is not None:
-            # Check if they share a single dimension (unstructured)
             if v_lat.dims == v_lon.dims and len(v_lat.dims) == 1:
-                # Filter out non-spatial dimensions (Time, Z)
                 for da in [v_lat, v_lon]:
                     isel_dict = {d: 0 for d in non_spatial_dims if d in da.dims}
                     if isel_dict:
@@ -803,11 +801,8 @@ def _create_esmf_grid(
 
     if is_unstructured:
         if coord_sys is None:
-            # For unstructured grids (MPAS/UGRID), coordinates are almost always
-            # geographic. Use SPH_DEG to handle the dateline wrap-around.
             coord_sys = esmpy.CoordSys.SPH_DEG
 
-        # Attempt Mesh creation for methods that support it on unstructured grids
         if method in ["conservative", "bilinear", "patch"]:
             try:
                 (
@@ -834,28 +829,23 @@ def _create_esmf_grid(
                 )
 
                 node_count = len(node_lon)
-                # ESMF/ESMPy typically expects 32-bit integers for IDs and connectivity
                 node_ids = np.arange(1, node_count + 1, dtype=np.int32)
                 node_coords = np.column_stack([node_lon, node_lat]).flatten()
-                node_owners = np.zeros(node_count, dtype=np.int32)  # Single processor
+                node_owners = np.zeros(node_count, dtype=np.int32)
 
                 mesh.add_nodes(
                     node_count,
                     node_ids,
-                    node_coords,  # node_coords must be 1D
+                    node_coords,
                     node_owners,
                 )
 
                 mask_arg = None
                 if mask_var and mask_var in ds:
                     if method == "conservative":
-                        # Map original cell mask to triangulated elements
                         mask_val = ds[mask_var].values
                         element_mask = mask_val[orig_idx].astype(np.int32)
                         mask_arg = element_mask
-                    else:
-                        # For bilinear/patch, mask is on nodes (handled via Field later)
-                        pass
 
                 mesh.add_elements(
                     len(element_ids),
@@ -869,9 +859,8 @@ def _create_esmf_grid(
             except ValueError:
                 if method == "conservative":
                     raise
-                # Fall through to LocStream or NotImplementedError
 
-        if method not in ["nearest_s2d", "nearest_d2s", "bilinear", "patch"]:
+        if method not in ["nearest_s2d", "nearest_d2s"]:
             raise NotImplementedError(
                 f"Method '{method}' requires connectivity information (UGRID, MPAS, or derived from SCRIP-style bounds) for unstructured grids. "
                 "For grids without connectivity, please use 'nearest_s2d' or 'nearest_d2s' (which utilize LocStreams), "
@@ -935,8 +924,6 @@ def _create_esmf_grid(
             staggerlocs.append(esmpy.StaggerLoc.CORNER)
 
         if coord_sys is None:
-            # Use CART for regional grids to avoid boundary chord issues
-            # SPH_DEG is used only for periodic/global grids or unstructured meshes.
             coord_sys = esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART
 
         grid = esmpy.Grid(
@@ -957,7 +944,6 @@ def _create_esmf_grid(
 
         if has_bounds:
             if lon_b.ndim == 1 and lat_b.ndim == 1:
-                # Need to convert to DataArray if they are just numpy arrays
                 if not isinstance(lon_b, xr.DataArray):
                     lon_b = xr.DataArray(lon_b)
                 if not isinstance(lat_b, xr.DataArray):

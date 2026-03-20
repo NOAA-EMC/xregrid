@@ -173,21 +173,22 @@ def test_mpas_to_scrip_regrid_aero():
     """Verify MPAS to SCRIP conversion and native regridding."""
     from xregrid.utils import mpas_to_scrip
 
-    n_cells = 20
-    max_edges = 6
+    n_cells = 4
+    # Create a minimal valid MPAS-like grid
     ds_mpas = xr.Dataset(
         data_vars={
             "temp": (["nCells"], np.random.rand(n_cells)),
             "verticesOnCell": (
                 ["nCells", "maxEdges"],
-                np.random.randint(1, 10, (n_cells, max_edges)),
+                np.array([[1, 2, 3], [1, 3, 4], [1, 2, 4], [2, 3, 4]]),
             ),
+            "nEdgesOnCell": (["nCells"], [3, 3, 3, 3]),
         },
         coords={
-            "latCell": (["nCells"], np.linspace(-90, 90, n_cells)),
-            "lonCell": (["nCells"], np.linspace(0, 360, n_cells)),
-            "latVertex": (["nVertices"], np.linspace(-90, 90, 10)),
-            "lonVertex": (["nVertices"], np.linspace(0, 360, 10)),
+            "latCell": (["nCells"], np.linspace(-45, 45, n_cells)),
+            "lonCell": (["nCells"], np.linspace(0, 90, n_cells)),
+            "latVertex": (["nVertices"], np.linspace(-90, 90, 5)),
+            "lonVertex": (["nVertices"], np.linspace(0, 360, 5)),
         },
     )
 
@@ -196,14 +197,25 @@ def test_mpas_to_scrip_regrid_aero():
     assert "lat_b" in ds_scrip.coords
     assert ds_scrip.lat.dims == ("grid_size",)
 
-    # 2. Regrid (should work with bilinear because scrip derivation works)
+    # 2. Regrid
     ds_tgt = create_global_grid(10, 20)
-    # SCRIP format derived has bounds, so bilinear should work
     regridder = Regridder(ds_scrip, ds_tgt, method="bilinear")
     assert regridder._is_unstructured_src
 
-    out = regridder(ds_mpas.rename({"nCells": "grid_size"}))
-    assert out.temp.dims == ("lat", "lon")
+    # Data to regrid must match the new grid_size dimension if using the scrip grid as source
+    # Only use coordinates that are compatible with the 1D grid_size dimension
+    compatible_coords = {
+        c: ds_scrip.coords[c]
+        for c in ds_scrip.coords
+        if set(ds_scrip.coords[c].dims).issubset({"grid_size"})
+    }
+    da_src = xr.DataArray(
+        np.random.rand(len(ds_scrip.grid_size)),
+        dims=["grid_size"],
+        coords=compatible_coords,
+    )
+    out = regridder(da_src)
+    assert out.dims == ("lat", "lon")
 
 
 if __name__ == "__main__":
