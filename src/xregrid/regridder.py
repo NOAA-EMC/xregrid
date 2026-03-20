@@ -484,6 +484,7 @@ class Regridder:
             periodic=self.periodic if is_source else False,
             mask_var=self.mask_var if is_source else None,
             coord_sys=self._coord_sys,
+            is_source=is_source,
         )
 
     def _generate_weights(self) -> None:

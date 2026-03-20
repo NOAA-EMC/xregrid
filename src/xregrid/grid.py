@@ -405,6 +405,7 @@ def _normalize_longitudes(da: xr.DataArray, lon0: float = 0.0) -> xr.DataArray:
 def _get_unstructured_mesh_info(
     ds: xr.Dataset,
     method: str = "conservative",
+    is_source: bool = True,
 ) -> Tuple[
     np.ndarray,  # node_lon
     np.ndarray,  # node_lat
@@ -560,7 +561,13 @@ def _get_unstructured_mesh_info(
 
     conn_var = None
     if mesh_var:
-        conn_var = ds[mesh_var].attrs.get("face_node_connectivity")
+        # Support both face-based and node-based methods
+        if method == "conservative":
+            conn_var = ds[mesh_var].attrs.get("face_node_connectivity")
+        else:
+            # For bilinear/patch, we can use face connectivity for discovery if it exists,
+            # but usually we just need the nodes which are already identified in ds.
+            conn_var = ds[mesh_var].attrs.get("face_node_connectivity")
 
     if not conn_var:
         # Fallback: Look for face_node_connectivity role directly
@@ -586,10 +593,11 @@ def _get_unstructured_mesh_info(
         ):
             node_coords_attr = ds[conn_var].attrs.get("node_coordinates", "").split()
             if len(node_coords_attr) >= 2:
+                # Standard UGRID order is usually (lon, lat) or (x, y)
                 node_lon_var = node_coords_attr[0]
                 node_lat_var = node_coords_attr[1]
 
-        if mesh_name and mesh_name in ds:
+        if not node_lon_var and mesh_name and mesh_name in ds:
             node_coords_attr = ds[mesh_name].attrs.get("node_coordinates", "").split()
             if len(node_coords_attr) >= 2:
                 node_lon_var = node_coords_attr[0]
@@ -619,10 +627,22 @@ def _get_unstructured_mesh_info(
 
         if not node_lon_var:
             # Last fallback
-            node_lon_var = "node_lon" if "node_lon" in ds else "lon_node"
-            node_lat_var = "node_lat" if "node_lat" in ds else "lat_node"
+            if "node_lon" in ds:
+                node_lon_var = "node_lon"
+            elif "lon_node" in ds:
+                node_lon_var = "lon_node"
 
-        if node_lon_var in ds and node_lat_var in ds:
+            if "node_lat" in ds:
+                node_lat_var = "node_lat"
+            elif "lat_node" in ds:
+                node_lat_var = "lat_node"
+
+        if (
+            node_lon_var
+            and node_lat_var
+            and node_lon_var in ds
+            and node_lat_var in ds
+        ):
             v_lon = ds[node_lon_var]
             v_lat = ds[node_lat_var]
             v_conn = ds[conn_var]
@@ -730,7 +750,10 @@ def _get_unstructured_mesh_info(
         )
 
     # 4. Fallback for non-conservative regridding (LocStreams)
-    if method not in ["conservative", "bilinear", "patch"]:
+    # Allowed for nearest-neighbor methods, or for bilinear/patch on target grids.
+    if method in ["nearest_s2d", "nearest_d2s"] or (
+        method in ["bilinear", "patch"] and not is_source
+    ):
         v_lat = _find_coord(ds, "latitude")
         v_lon = _find_coord(ds, "longitude")
 
@@ -756,7 +779,7 @@ def _get_unstructured_mesh_info(
                 )
 
     raise ValueError(
-        "Could not find unstructured mesh connectivity (MPAS or UGRID) for conservative regridding."
+        f"Could not find unstructured mesh connectivity (MPAS or UGRID) for {method} regridding."
     )
 
 
@@ -766,6 +789,7 @@ def _create_esmf_grid(
     periodic: bool = False,
     mask_var: Optional[str] = None,
     coord_sys: Any = None,
+    is_source: bool = True,
 ) -> Tuple[Any, list[str], Optional[np.ndarray]]:
     """
     Create an ESMF Grid or LocStream from an xarray Dataset.
@@ -803,20 +827,20 @@ def _create_esmf_grid(
         if coord_sys is None:
             coord_sys = esmpy.CoordSys.SPH_DEG
 
-        if method in ["conservative", "bilinear", "patch"]:
-            try:
-                (
-                    node_lon,
-                    node_lat,
-                    element_conn,
-                    element_types,
-                    element_ids,
-                    orig_idx,
-                ) = _get_unstructured_mesh_info(ds, method=method)
+        # For unstructured grids, try to create a Mesh if connectivity is available.
+        # Conservative regridding ALWAYS requires a Mesh.
+        # Bilinear/Patch require a Mesh ONLY when used as the source.
+        try:
+            (
+                node_lon,
+                node_lat,
+                element_conn,
+                element_types,
+                element_ids,
+                orig_idx,
+            ) = _get_unstructured_mesh_info(ds, method=method, is_source=is_source)
 
-                if len(element_ids) == 0:
-                    raise ValueError("No elements found for Mesh creation.")
-
+            if len(element_ids) > 0:
                 if "lat_b" in ds and "lon_b" in ds and ds["lat_b"].ndim == 2:
                     provenance.append(
                         "Derived unstructured mesh connectivity from SCRIP-style bounds."
@@ -856,11 +880,16 @@ def _create_esmf_grid(
                 )
 
                 return mesh, provenance, orig_idx
-            except ValueError:
-                if method == "conservative":
-                    raise
+        except ValueError:
+            # Fallback to LocStream is only allowed for:
+            # 1. Non-conservative methods on target grids
+            # 2. Nearest-neighbor methods on source grids
+            if method == "conservative":
+                raise
+            if is_source and method in ["bilinear", "patch"]:
+                raise
 
-        if method not in ["nearest_s2d", "nearest_d2s"]:
+        if method not in ["nearest_s2d", "nearest_d2s"] and is_source:
             raise NotImplementedError(
                 f"Method '{method}' requires connectivity information (UGRID, MPAS, or derived from SCRIP-style bounds) for unstructured grids. "
                 "For grids without connectivity, please use 'nearest_s2d' or 'nearest_d2s' (which utilize LocStreams), "
