@@ -182,11 +182,6 @@ def _get_mesh_info(
         "nNodes",
         "nFaces",
         "nEdges",
-        "n_node",
-        "n_face",
-        "n_edge",
-        "n_cells",
-        "n_vertices",
         "node",
         "face",
         "vertex",
@@ -871,7 +866,7 @@ def _create_esmf_grid(
                     raise
                 # Fall through to LocStream or NotImplementedError
 
-        if method not in ["nearest_s2d", "nearest_d2s", "bilinear", "patch"]:
+        if method not in ["nearest_s2d", "nearest_d2s"]:
             raise NotImplementedError(
                 f"Method '{method}' requires connectivity information (UGRID, MPAS, or derived from SCRIP-style bounds) for unstructured grids. "
                 "For grids without connectivity, please use 'nearest_s2d' or 'nearest_d2s' (which utilize LocStreams), "

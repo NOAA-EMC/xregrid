@@ -1384,3 +1384,115 @@ def spatial_slice(
     update_history(res, msg)
 
     return res
+
+
+def mpas_to_scrip(ds: xr.Dataset) -> xr.Dataset:
+    """
+    Convert an MPAS-native dataset to a CF-compliant SCRIP-style format.
+
+    Extracts cell centers and vertex coordinates, using the connectivity
+    information to build explicit boundary coordinates (lat_b, lon_b).
+    This enables conservative regridding for MPAS grids.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        The MPAS dataset containing 'latCell', 'lonCell', 'latVertex',
+        'lonVertex', and 'verticesOnCell'.
+
+    Returns
+    -------
+    xr.Dataset
+        A new dataset with 'lat', 'lon', 'lat_b', and 'lon_b' coordinates
+        on the 'grid_size' dimension.
+    """
+    # 1. Identify required variables
+    try:
+        lat_cell = ds["latCell"]
+        lon_cell = ds["lonCell"]
+        lat_vertex = ds["latVertex"]
+        lon_vertex = ds["lonVertex"]
+        v_on_cell = ds["verticesOnCell"]
+    except KeyError as e:
+        raise KeyError(f"MPAS dataset missing required variable: {e}")
+
+    # 2. Convert radians to degrees if necessary
+    def _ensure_degrees(da):
+        if da.attrs.get("units") in ["radian", "radians", "rad"]:
+            return da * 180.0 / np.pi
+        return da
+
+    lat_c = _ensure_degrees(lat_cell)
+    lon_c = _ensure_degrees(lon_cell)
+    lat_v = _ensure_degrees(lat_vertex)
+    lon_v = _ensure_degrees(lon_vertex)
+
+    # 3. Handle connectivity (MPAS is 1-based)
+    # verticesOnCell is (nCells, maxEdges)
+    # Identify dimensions
+    nv_dim = v_on_cell.dims[1]
+    vertex_dim = lat_v.dims[0]
+
+    v_idx = v_on_cell - 1
+
+    def _map_vertices(indices, coords):
+        # indices: (N, K), coords: (M,) -> result: (N, K)
+        # Handle padding: MPAS uses 0 for padding in 1-based, becomes -1 here
+        mask = indices >= 0
+        # Use a safe index for padding, we will mask it later if needed
+        # but for SCRIP-style bounds, ESMF handles fixed-size corner arrays.
+        safe_indices = np.where(mask, indices, 0)
+        out = coords[safe_indices]
+        return out
+
+    lat_b_data = xr.apply_ufunc(
+        _map_vertices,
+        v_idx,
+        lat_v,
+        dask="parallelized",
+        output_dtypes=[lat_v.dtype],
+        input_core_dims=[[nv_dim], [vertex_dim]],
+        output_core_dims=[[nv_dim]],
+    )
+
+    lon_b_data = xr.apply_ufunc(
+        _map_vertices,
+        v_idx,
+        lon_v,
+        dask="parallelized",
+        output_dtypes=[lon_v.dtype],
+        input_core_dims=[[nv_dim], [vertex_dim]],
+        output_core_dims=[[nv_dim]],
+    )
+
+    # Create the SCRIP-style dataset
+    # Map MPAS dimensions to standard SCRIP names
+    scrip_ds = xr.Dataset(
+        coords={
+            "lat": (["grid_size"], lat_c.data, lat_c.attrs),
+            "lon": (["grid_size"], lon_c.data, lon_c.attrs),
+            "lat_b": (
+                ["grid_size", "nv"],
+                lat_b_data.data,
+                {"units": "degrees_north", "standard_name": "latitude_bounds"},
+            ),
+            "lon_b": (
+                ["grid_size", "nv"],
+                lon_b_data.data,
+                {"units": "degrees_east", "standard_name": "longitude_bounds"},
+            ),
+        },
+        attrs=ds.attrs,
+    )
+
+    # Link bounds
+    scrip_ds["lat"].attrs["bounds"] = "lat_b"
+    scrip_ds["lon"].attrs["bounds"] = "lon_b"
+
+    # Add standard names if missing
+    scrip_ds["lat"].attrs["standard_name"] = "latitude"
+    scrip_ds["lon"].attrs["standard_name"] = "longitude"
+
+    update_history(scrip_ds, "Converted from MPAS-native to SCRIP-style format.")
+
+    return scrip_ds

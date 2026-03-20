@@ -169,5 +169,42 @@ def test_mpas_non_conservative_discovery_aero():
     assert out.temp.dims == ("lat", "lon")
 
 
+def test_mpas_to_scrip_regrid_aero():
+    """Verify MPAS to SCRIP conversion and native regridding."""
+    from xregrid.utils import mpas_to_scrip
+
+    n_cells = 20
+    max_edges = 6
+    ds_mpas = xr.Dataset(
+        data_vars={
+            "temp": (["nCells"], np.random.rand(n_cells)),
+            "verticesOnCell": (
+                ["nCells", "maxEdges"],
+                np.random.randint(1, 10, (n_cells, max_edges)),
+            ),
+        },
+        coords={
+            "latCell": (["nCells"], np.linspace(-90, 90, n_cells)),
+            "lonCell": (["nCells"], np.linspace(0, 360, n_cells)),
+            "latVertex": (["nVertices"], np.linspace(-90, 90, 10)),
+            "lonVertex": (["nVertices"], np.linspace(0, 360, 10)),
+        },
+    )
+
+    # 1. Convert
+    ds_scrip = mpas_to_scrip(ds_mpas)
+    assert "lat_b" in ds_scrip.coords
+    assert ds_scrip.lat.dims == ("grid_size",)
+
+    # 2. Regrid (should work with bilinear because scrip derivation works)
+    ds_tgt = create_global_grid(10, 20)
+    # SCRIP format derived has bounds, so bilinear should work
+    regridder = Regridder(ds_scrip, ds_tgt, method="bilinear")
+    assert regridder._is_unstructured_src
+
+    out = regridder(ds_mpas.rename({"nCells": "grid_size"}))
+    assert out.temp.dims == ("lat", "lon")
+
+
 if __name__ == "__main__":
     pytest.main([__file__])
