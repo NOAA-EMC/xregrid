@@ -68,6 +68,8 @@ def _get_non_spatial_dims(ds: Union[xr.Dataset, xr.DataArray]) -> set[str]:
 
 def _get_mesh_info(
     ds: xr.Dataset,
+    method: Optional[str] = None,
+    is_source: bool = True,
 ) -> Tuple[xr.DataArray, xr.DataArray, Tuple[int, ...], Tuple[str, ...], bool]:
     """
     Detect grid type and extract coordinates and shape from a dataset.
@@ -76,6 +78,10 @@ def _get_mesh_info(
     ----------
     ds : xr.Dataset
         The input dataset containing spatial coordinates.
+    method : str, optional
+        Regridding method.
+    is_source : bool, default True
+        Whether this is the source grid.
 
     Returns
     -------
@@ -89,13 +95,6 @@ def _get_mesh_info(
         The names of the spatial dimensions.
     is_unstructured : bool
         Whether the grid is unstructured.
-
-    Raises
-    ------
-    KeyError
-        If latitude or longitude coordinates cannot be found.
-    ValueError
-        If coordinates have invalid dimensionality.
     """
     # Identify and filter out non-spatial dimensions (Time, Z)
     non_spatial_dims = _get_non_spatial_dims(ds)
@@ -103,14 +102,24 @@ def _get_mesh_info(
     # Handle uxarray objects
     if hasattr(ds, "uxgrid"):
         uxgrid = getattr(ds, "uxgrid")
-        # Prefer coordinates that match data variables if present
         try:
             # Check if data variable is on faces
             use_faces = False
-            if hasattr(ds, "data_vars") and len(ds.data_vars) > 0:
-                first_var = list(ds.data_vars.values())[0]
-                if "n_face" in first_var.dims or "nFaces" in first_var.dims:
-                    use_faces = True
+            if method == "conservative":
+                use_faces = True
+            elif hasattr(ds, "data_vars") and len(ds.data_vars) > 0:
+                # Find the first data variable that is not a coordinate or topology
+                first_var = None
+                for v in ds.data_vars.values():
+                    if v.attrs.get("cf_role") not in [
+                        "mesh_topology",
+                        "face_node_connectivity",
+                    ]:
+                        first_var = v
+                        break
+                if first_var is not None:
+                    if "n_face" in first_var.dims or "nFaces" in first_var.dims:
+                        use_faces = True
 
             if (
                 use_faces
@@ -136,31 +145,88 @@ def _get_mesh_info(
         except (AttributeError, KeyError):
             pass
 
-    lat = _find_coord(ds, "latitude")
-    lon = _find_coord(ds, "longitude")
+    # UGRID/unstructured coordinate prioritization
+    lat = None
+    lon = None
 
-    if lat is None or lon is None:
-        if "lat" in ds and "lon" in ds:
+    # 1. First priority: coordinates that match the first data variable's dimensions
+    if hasattr(ds, "data_vars") and len(ds.data_vars) > 0:
+        first_var = None
+        for v in ds.data_vars.values():
+            if v.attrs.get("cf_role") not in [
+                "mesh_topology",
+                "face_node_connectivity",
+            ]:
+                first_var = v
+                break
+        if first_var is not None:
+            for c_name in ds.coords:
+                c = ds[c_name]
+                if (
+                    c.attrs.get("standard_name") == "latitude"
+                    or "lat" in c_name.lower()
+                ) and set(c.dims).issubset(set(first_var.dims)):
+                    lat = c
+                    break
+
+    # 2. Second priority: method-based defaults
+    if lat is None:
+        if method == "conservative":
+            # Prefer elements/faces
+            for v in ["lat_face", "latCell", "lat_element", "lat"]:
+                if v in ds and ("face" in v.lower() or "cell" in v.lower()):
+                    lat = ds[v]
+                    break
+        elif method in ["bilinear", "patch"]:
+            # Prefer nodes/vertices for both source and target
+            for v in ["lat_node", "lat_vertex", "lat"]:
+                if v in ds and ("node" in v.lower() or "vertex" in v.lower()):
+                    lat = ds[v]
+                    break
+
+    if lat is None:
+        lat = _find_coord(ds, "latitude")
+
+    if lat is None:
+        if "lat" in ds:
             lat = ds["lat"]
-            lon = ds["lon"]
-        elif "latCell" in ds and "lonCell" in ds:
+        elif "latCell" in ds:
             lat = ds["latCell"]
-            lon = ds["lonCell"]
-        elif "lat_face" in ds and "lon_face" in ds:
+        elif "lat_face" in ds:
             lat = ds["lat_face"]
-            lon = ds["lon_face"]
-        elif "lat_node" in ds and "lon_node" in ds:
+        elif "lat_node" in ds:
             lat = ds["lat_node"]
-            lon = ds["lon_node"]
-        elif "latitude" in ds and "longitude" in ds:
+        elif "latitude" in ds:
             lat = ds["latitude"]
+
+    if lat is None:
+        raise KeyError(
+            "Could not find latitude coordinates. "
+            "Ensure they are named 'lat'/'lon', 'latCell'/'lonCell', "
+            "'lat_node'/'lon_node', or have CF attributes."
+        )
+
+    # Find matching longitude
+    lon_name = lat.name.replace("lat", "lon").replace("LAT", "LON")
+    if lon_name in ds:
+        lon = ds[lon_name]
+    else:
+        lon = _find_coord(ds, "longitude")
+
+    if lon is None:
+        if "lon" in ds:
+            lon = ds["lon"]
+        elif "lonCell" in ds:
+            lon = ds["lonCell"]
+        elif "lon_face" in ds:
+            lon = ds["lon_face"]
+        elif "lon_node" in ds:
+            lon = ds["lon_node"]
+        elif "longitude" in ds:
             lon = ds["longitude"]
-        else:
-            raise KeyError(
-                "Could not find latitude/longitude coordinates. "
-                "Ensure they are named 'lat'/'lon', 'latCell'/'lonCell', "
-                "'lat_node'/'lon_node', or have CF attributes."
-            )
+
+    if lon is None:
+        raise KeyError("Could not find longitude coordinates matching latitude.")
 
     # Filter out non-spatial dimensions if they are present in lat/lon
     lat_isel = {d: 0 for d in non_spatial_dims if d in lat.dims}
@@ -171,7 +237,6 @@ def _get_mesh_info(
         lon = lon.isel(lon_isel, drop=True)
 
     # UGRID: Check for 'mesh' and 'location' attributes or topology to confirm unstructured
-    # Also check for common atmospheric model dimensions like 'ncol' (CAM-SE), 'nCells' (MPAS)
     is_unstructured_fmt = False
     unstructured_dims = {
         "ncol",
@@ -218,7 +283,6 @@ def _get_mesh_info(
             return lon, lat, lat.shape, lat.dims, True
         elif is_unstructured_fmt:
             # Check if it's really unstructured or just missing one dimension of a rectilinear grid
-            # If lat and lon have different 1D dimensions, it's likely rectilinear unless explicitly forced
             if len(lat.dims) == 1 and len(lon.dims) == 1 and lat.dims != lon.dims:
                 # Rectilinear path
                 lon_mesh, lat_mesh = xr.broadcast(lon, lat)
@@ -366,9 +430,6 @@ def _clip_latitudes(da: xr.DataArray) -> xr.DataArray:
     """
     Clip latitude values to exactly [-90, 90] to avoid ESMF errors.
 
-    ESMF can fail with ESMF_RC_VAL_OUTOFRANGE if latitudes are even slightly
-    beyond 90 degrees due to floating point precision.
-
     Parameters
     ----------
     da : xr.DataArray
@@ -425,6 +486,8 @@ def _get_unstructured_mesh_info(
         The dataset containing mesh information.
     method : str, default 'conservative'
         The regridding method.
+    is_source : bool, default True
+        Whether this is the source grid.
 
     Returns
     -------
@@ -435,7 +498,7 @@ def _get_unstructured_mesh_info(
     element_conn : np.ndarray
         Connectivity of elements (0-based indices).
     element_types : np.ndarray
-        Types of elements (e.g. esmpy.MeshElemType.TRI).
+        Types of elements.
     element_ids : np.ndarray
         Unique IDs for each element.
     orig_cell_index : np.ndarray or None
@@ -457,11 +520,6 @@ def _get_unstructured_mesh_info(
                 "_FillValue", -9223372036854775808
             )
 
-            element_conn = []
-            element_types = []
-            element_ids = []
-            orig_cell_index = []
-
             # Vectorized triangulation
             n_cells, max_edges = conn_raw.shape
             n_edges = np.sum(conn_raw != fill_value, axis=1)
@@ -470,7 +528,6 @@ def _get_unstructured_mesh_info(
             j = np.arange(1, max_tris + 1)
             mask = j[None, :] < (n_edges[:, None] - 1)
 
-            # Extract v0, v1, v2 for all possible triangles
             v0 = np.repeat(conn_raw[:, 0:1], max_tris, axis=1) - start_index
             v1 = conn_raw[:, 1:-1] - start_index
             v2 = conn_raw[:, 2:] - start_index
@@ -499,7 +556,6 @@ def _get_unstructured_mesh_info(
         v_lon = ds["lonVertex"]
         v_conn = ds["verticesOnCell"]
 
-        # Filter out non-spatial dimensions
         for da in [v_lat, v_lon, v_conn]:
             isel_dict = {d: 0 for d in non_spatial_dims if d in da.dims}
             if isel_dict:
@@ -519,16 +575,8 @@ def _get_unstructured_mesh_info(
             else np.full(ds.sizes["nCells"], conn_raw.shape[1])
         )
 
-        element_conn = []
-        element_types = []
-        element_ids = []
-        orig_cell_index = []
-
-        # Vectorized triangulation for MPAS
-        # MPAS is 1-based indexing for vertex IDs
         n_cells, max_edges = conn_raw.shape
         max_tris = max_edges - 2
-
         j = np.arange(1, max_tris + 1)
         mask = j[None, :] < (n_edges[:, None] - 1)
 
@@ -552,7 +600,7 @@ def _get_unstructured_mesh_info(
             orig_cell_index.astype(np.int32),
         )
 
-    # 2. Detect UGRID (Standard Compliance)
+    # 2. Detect UGRID
     mesh_var = None
     for var in ds.variables:
         if ds[var].attrs.get("cf_role") == "mesh_topology":
@@ -561,16 +609,9 @@ def _get_unstructured_mesh_info(
 
     conn_var = None
     if mesh_var:
-        # Support both face-based and node-based methods
-        if method == "conservative":
-            conn_var = ds[mesh_var].attrs.get("face_node_connectivity")
-        else:
-            # For bilinear/patch, we can use face connectivity for discovery if it exists,
-            # but usually we just need the nodes which are already identified in ds.
-            conn_var = ds[mesh_var].attrs.get("face_node_connectivity")
+        conn_var = ds[mesh_var].attrs.get("face_node_connectivity")
 
     if not conn_var:
-        # Fallback: Look for face_node_connectivity role directly
         for var in ds.variables:
             if ds[var].attrs.get("cf_role") == "face_node_connectivity":
                 conn_var = var
@@ -581,19 +622,12 @@ def _get_unstructured_mesh_info(
 
     if conn_var:
         mesh_name = mesh_var or ds[conn_var].attrs.get("mesh", "")
-
         node_lon_var = None
         node_lat_var = None
 
-        # Prefer connectivity-linked coordinates
-        if (
-            not node_lon_var
-            and hasattr(ds[conn_var], "attrs")
-            and "node_coordinates" in ds[conn_var].attrs
-        ):
+        if hasattr(ds[conn_var], "attrs") and "node_coordinates" in ds[conn_var].attrs:
             node_coords_attr = ds[conn_var].attrs.get("node_coordinates", "").split()
             if len(node_coords_attr) >= 2:
-                # Standard UGRID order is usually (lon, lat) or (x, y)
                 node_lon_var = node_coords_attr[0]
                 node_lat_var = node_coords_attr[1]
 
@@ -604,34 +638,20 @@ def _get_unstructured_mesh_info(
                 node_lat_var = node_coords_attr[1]
 
         if not node_lon_var:
-            # Enhanced discovery using attributes and common names
             for v in ds.variables:
                 if v == conn_var:
                     continue
                 attrs = ds[v].attrs
-                if attrs.get("standard_name") == "longitude" and (
-                    "node" in v.lower() or attrs.get("location") == "node"
-                ):
+                if attrs.get("standard_name") == "longitude":
                     node_lon_var = v
-                elif attrs.get("standard_name") == "longitude" and node_lon_var is None:
-                    # Fallback for UGRID files where location=node might be missing
-                    node_lon_var = v
-
-                if attrs.get("standard_name") == "latitude" and (
-                    "node" in v.lower() or attrs.get("location") == "node"
-                ):
-                    node_lat_var = v
-                elif attrs.get("standard_name") == "latitude" and node_lat_var is None:
-                    # Fallback for UGRID files where location=node might be missing
+                if attrs.get("standard_name") == "latitude":
                     node_lat_var = v
 
         if not node_lon_var:
-            # Last fallback
             if "node_lon" in ds:
                 node_lon_var = "node_lon"
             elif "lon_node" in ds:
                 node_lon_var = "lon_node"
-
             if "node_lat" in ds:
                 node_lat_var = "node_lat"
             elif "lat_node" in ds:
@@ -642,7 +662,6 @@ def _get_unstructured_mesh_info(
             v_lat = ds[node_lat_var]
             v_conn = ds[conn_var]
 
-            # Filter out non-spatial dimensions
             for da in [v_lon, v_lat, v_conn]:
                 isel_dict = {d: 0 for d in non_spatial_dims if d in da.dims}
                 if isel_dict:
@@ -659,16 +678,9 @@ def _get_unstructured_mesh_info(
             start_index = ds[conn_var].attrs.get("start_index", 0)
             fill_value = ds[conn_var].attrs.get("_FillValue", -1)
 
-            element_conn = []
-            element_types = []
-            element_ids = []
-            orig_cell_index = []
-
-            # Vectorized triangulation for UGRID
             n_cells, max_edges = conn_raw.shape
             n_edges = np.sum(conn_raw != fill_value, axis=1)
             max_tris = max_edges - 2
-
             j = np.arange(1, max_tris + 1)
             mask = j[None, :] < (n_edges[:, None] - 1)
 
@@ -692,13 +704,10 @@ def _get_unstructured_mesh_info(
                 orig_cell_index.astype(np.int32),
             )
 
-    # 3. Detect SCRIP Unstructured
+    # 3. Detect SCRIP
     if "lat_b" in ds and "lon_b" in ds and ds["lat_b"].ndim == 2:
         v_lat_b = ds["lat_b"]
         v_lon_b = ds["lon_b"]
-
-        # Filter out non-spatial dimensions
-        non_spatial_dims = _get_non_spatial_dims(ds)
         for da in [v_lat_b, v_lon_b]:
             isel_dict = {d: 0 for d in non_spatial_dims if d in da.dims}
             if isel_dict:
@@ -711,7 +720,6 @@ def _get_unstructured_mesh_info(
         flat_lat = _clip_latitudes(_to_degrees(v_lat_b)).values.flatten()
         flat_lon = _normalize_longitudes(_to_degrees(v_lon_b)).values.flatten()
 
-        # Identify unique nodes
         coords = np.column_stack([flat_lon, flat_lat])
         coords_rounded = np.round(coords, 8)
         _, unique_indices, inverse_indices = np.unique(
@@ -722,7 +730,6 @@ def _get_unstructured_mesh_info(
         node_lat = flat_lat[unique_indices]
         conn_raw = inverse_indices.reshape(n_cells, n_corners)
 
-        # Triangulate
         max_tris = n_corners - 2
         v0 = np.repeat(conn_raw[:, 0:1], max_tris, axis=1)
         v1 = conn_raw[:, 1:-1]
@@ -744,8 +751,7 @@ def _get_unstructured_mesh_info(
             orig_cell_index.astype(np.int32),
         )
 
-    # 4. Fallback for non-conservative regridding (LocStreams)
-    # Allowed for nearest-neighbor methods, or for bilinear/patch on target grids.
+    # 4. Fallback for LocStreams
     if method in ["nearest_s2d", "nearest_d2s"] or (
         method in ["bilinear", "patch"] and not is_source
     ):
@@ -801,20 +807,24 @@ def _create_esmf_grid(
         Variable name for the mask.
     coord_sys : Any, optional
         The coordinate system (esmpy.CoordSys).
+    is_source : bool, default True
+        Whether this is the source grid.
 
     Returns
     -------
     grid : esmpy.Grid or esmpy.LocStream or esmpy.Mesh
         The created ESMF object.
     provenance : list of str
-        A list of provenance messages describing automatic transformations.
+        Provenance messages.
     orig_idx : np.ndarray or None
         Original cell indices if triangulation was performed.
     """
     import esmpy
 
     non_spatial_dims = _get_non_spatial_dims(ds)
-    lon, lat, shape, dims, is_unstructured = _get_mesh_info(ds)
+    lon, lat, shape, dims, is_unstructured = _get_mesh_info(
+        ds, method=method, is_source=is_source
+    )
     provenance = []
     orig_idx = None
 
@@ -822,73 +832,74 @@ def _create_esmf_grid(
         if coord_sys is None:
             coord_sys = esmpy.CoordSys.SPH_DEG
 
-        # For unstructured grids, try to create a Mesh if connectivity is available.
-        # Conservative regridding ALWAYS requires a Mesh.
-        # Bilinear/Patch require a Mesh ONLY when used as the source.
-        try:
-            (
-                node_lon,
-                node_lat,
-                element_conn,
-                element_types,
-                element_ids,
-                orig_idx,
-            ) = _get_unstructured_mesh_info(ds, method=method, is_source=is_source)
+        use_mesh = False
+        if method == "conservative":
+            use_mesh = True
+        elif is_source and method in ["bilinear", "patch"]:
+            use_mesh = True
 
-            if len(element_ids) > 0:
-                if "lat_b" in ds and "lon_b" in ds and ds["lat_b"].ndim == 2:
-                    provenance.append(
-                        "Derived unstructured mesh connectivity from SCRIP-style bounds."
+        if use_mesh:
+            try:
+                (
+                    node_lon,
+                    node_lat,
+                    element_conn,
+                    element_types,
+                    element_ids,
+                    orig_idx,
+                ) = _get_unstructured_mesh_info(ds, method=method, is_source=is_source)
+
+                if len(element_ids) > 0:
+                    if "lat_b" in ds and "lon_b" in ds and ds["lat_b"].ndim == 2:
+                        provenance.append(
+                            "Derived unstructured mesh connectivity from SCRIP-style bounds."
+                        )
+
+                    mesh = esmpy.Mesh(
+                        parametric_dim=2,
+                        spatial_dim=2,
+                        coord_sys=coord_sys,
                     )
 
-                mesh = esmpy.Mesh(
-                    parametric_dim=2,
-                    spatial_dim=2,
-                    coord_sys=coord_sys,
-                )
+                    node_count = len(node_lon)
+                    node_ids = np.arange(1, node_count + 1, dtype=np.int32)
+                    node_coords = np.column_stack([node_lon, node_lat]).flatten()
+                    node_owners = np.zeros(node_count, dtype=np.int32)
 
-                node_count = len(node_lon)
-                node_ids = np.arange(1, node_count + 1, dtype=np.int32)
-                node_coords = np.column_stack([node_lon, node_lat]).flatten()
-                node_owners = np.zeros(node_count, dtype=np.int32)
+                    mesh.add_nodes(
+                        node_count,
+                        node_ids,
+                        node_coords,
+                        node_owners,
+                    )
 
-                mesh.add_nodes(
-                    node_count,
-                    node_ids,
-                    node_coords,
-                    node_owners,
-                )
+                    mask_arg = None
+                    if mask_var and mask_var in ds:
+                        if method == "conservative":
+                            mask_val = ds[mask_var].values
+                            element_mask = mask_val[orig_idx].astype(np.int32)
+                            mask_arg = element_mask
 
-                mask_arg = None
-                if mask_var and mask_var in ds:
-                    if method == "conservative":
-                        mask_val = ds[mask_var].values
-                        element_mask = mask_val[orig_idx].astype(np.int32)
-                        mask_arg = element_mask
+                    mesh.add_elements(
+                        len(element_ids),
+                        np.array(element_ids, dtype=np.int32),
+                        np.array(element_types, dtype=np.int32),
+                        np.array(element_conn, dtype=np.int32),
+                        element_mask=mask_arg if method == "conservative" else None,
+                    )
 
-                mesh.add_elements(
-                    len(element_ids),
-                    np.array(element_ids, dtype=np.int32),
-                    np.array(element_types, dtype=np.int32),
-                    np.array(element_conn, dtype=np.int32),
-                    element_mask=mask_arg if method == "conservative" else None,
-                )
-
-                return mesh, provenance, orig_idx
-        except ValueError:
-            # Fallback to LocStream is only allowed for:
-            # 1. Non-conservative methods on target grids
-            # 2. Nearest-neighbor methods on source grids
-            if method == "conservative":
-                raise
-            if is_source and method in ["bilinear", "patch"]:
-                raise
+                    return mesh, provenance, orig_idx
+                else:
+                    raise ValueError("No elements found")
+            except ValueError:
+                if method == "conservative":
+                    raise
+                if is_source and method in ["bilinear", "patch"]:
+                    raise
 
         if method not in ["nearest_s2d", "nearest_d2s"] and is_source:
             raise NotImplementedError(
-                f"Method '{method}' requires connectivity information (UGRID, MPAS, or derived from SCRIP-style bounds) for unstructured grids. "
-                "For grids without connectivity, please use 'nearest_s2d' or 'nearest_d2s' (which utilize LocStreams), "
-                "or ensure your source data includes CF-compliant bounds to trigger automatic connectivity derivation."
+                f"Method '{method}' requires connectivity information for unstructured grids. "
             )
         locstream = esmpy.LocStream(shape[0], coord_sys=coord_sys)
         if coord_sys == esmpy.CoordSys.CART:
@@ -929,18 +940,13 @@ def _create_esmf_grid(
             try:
                 ds_with_bounds = ds.cf.add_bounds(["latitude", "longitude"])
                 lat_b, lon_b = _get_grid_bounds(ds_with_bounds)
-                if lat_b is not None and lon_b is not None:
-                    provenance.append(
-                        f"Automatically generated cell boundaries for {method} regridding."
-                    )
             except Exception:
                 pass
 
         has_bounds = lat_b is not None and lon_b is not None
         if method == "conservative" and not has_bounds:
             raise ValueError(
-                "Conservative regridding requires cell boundaries (bounds). "
-                "Ensure your dataset has 'lat_b' and 'lon_b' or CF-compliant bounds."
+                "Conservative regridding requires cell boundaries (bounds)."
             )
 
         staggerlocs = [esmpy.StaggerLoc.CENTER]

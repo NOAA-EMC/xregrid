@@ -217,8 +217,12 @@ class Regridder:
                 is_geographic = False
 
             # Determine if we have unstructured grids
-            _, _, _, _, is_unstructured_src = _get_mesh_info(source_grid_ds)
-            _, _, _, _, is_unstructured_tgt = _get_mesh_info(target_grid_ds)
+            _, _, _, _, is_unstructured_src = _get_mesh_info(
+                source_grid_ds, method=method, is_source=True
+            )
+            _, _, _, _, is_unstructured_tgt = _get_mesh_info(
+                target_grid_ds, method=method, is_source=False
+            )
 
             # Use SPH_DEG if:
             # 1. periodic=True
@@ -398,8 +402,12 @@ class Regridder:
             If the loaded weights do not match the current regridding configuration.
         """
         # Get current grid info
-        _, _, src_shape, src_dims, _ = _get_mesh_info(self.source_grid_ds)
-        _, _, dst_shape, dst_dims, _ = _get_mesh_info(self.target_grid_ds)
+        _, _, src_shape, src_dims, _ = _get_mesh_info(
+            self.source_grid_ds, method=self.method, is_source=True
+        )
+        _, _, dst_shape, dst_dims, _ = _get_mesh_info(
+            self.target_grid_ds, method=self.method, is_source=False
+        )
 
         if src_shape != self._shape_source:
             raise ValueError(
@@ -666,7 +674,7 @@ class Regridder:
         # Get grid info and populate internal state
         # Source
         _, _, src_shape, src_dims, is_unstructured_src = _get_mesh_info(
-            self.source_grid_ds
+            self.source_grid_ds, method=self.method, is_source=True
         )
         self._shape_source = src_shape
         self._dims_source = src_dims
@@ -674,7 +682,7 @@ class Regridder:
 
         # Target
         _, _, dst_shape, dst_dims, is_unstructured_dst = _get_mesh_info(
-            self.target_grid_ds
+            self.target_grid_ds, method=self.method, is_source=False
         )
         self._shape_target = dst_shape
         self._dims_target = dst_dims
