@@ -13,6 +13,8 @@ nav = [
         { "Quick Start" = "user-guide/quickstart.md" },
         { "Command Line Interface" = "user-guide/cli.md" },
         { "Unstructured Grids" = "user-guide/unstructured.md" },
+        { "Visualization" = "user-guide/visualization.md" },
+        { "HPC and Dask" = "user-guide/hpc.md" },
         { "Performance" = "user-guide/performance.md" }
     ]},
     { "Examples" = [
