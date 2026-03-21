@@ -83,6 +83,8 @@ def plot_static(
     # We do this early so it applies even if cartopy is missing.
 
     # Identify spatial dimensions using cf-xarray or fallbacks for robust slicing
+    lat_da = None
+    lon_da = None
     try:
         # Use enhanced discovery
         lat_da = _find_coord(da, "latitude")
@@ -196,7 +198,16 @@ def plot_static(
     if is_faceted and "subplot_kws" not in kwargs:
         kwargs["subplot_kws"] = {"projection": projection}
 
-    im = da.plot(ax=ax, **kwargs)
+    if da.ndim == 1 and lat_da is not None and lon_da is not None:
+        # For unstructured 1D data, use scatter to ensure geospatial representation
+        # Following Aero "No Ambiguous Plots" rule.
+        if "x" not in kwargs:
+            kwargs["x"] = lon_da.name
+        if "y" not in kwargs:
+            kwargs["y"] = lat_da.name
+        im = da.plot.scatter(ax=ax, **kwargs)
+    else:
+        im = da.plot(ax=ax, **kwargs)
 
     if is_faceted:
         # im is a FacetGrid
@@ -298,6 +309,17 @@ def plot_interactive(
         crs_obj = get_crs_info(da)
         if crs_obj:
             kwargs["geo"] = True
+
+    # Aero Protocol: Ensure 1D unstructured grids are rendered as maps, not line plots.
+    if da.ndim == 1 and "kind" not in kwargs:
+        lat_da = _find_coord(da, "latitude")
+        lon_da = _find_coord(da, "longitude")
+        if lat_da is not None and lon_da is not None:
+            kwargs["kind"] = "points"
+            if "x" not in kwargs:
+                kwargs["x"] = lon_da.name
+            if "y" not in kwargs:
+                kwargs["y"] = lat_da.name
 
     return da.hvplot(rasterize=rasterize, title=title, **kwargs)
 
