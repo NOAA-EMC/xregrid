@@ -10,6 +10,11 @@ import xarray as xr
 from scipy.sparse import coo_matrix
 
 from xregrid.utils import update_history, get_crs_info
+from xregrid.constants import (
+    get_regrid_method_map,
+    get_extrap_method_map,
+    get_coord_sys,
+)
 from xregrid.grid import (
     _get_mesh_info,
     _get_non_spatial_dims,
@@ -232,23 +237,12 @@ class Regridder:
             if periodic or (
                 is_geographic and (is_unstructured_src or is_unstructured_tgt)
             ):
-                self._coord_sys = esmpy.CoordSys.SPH_DEG
+                self._coord_sys = get_coord_sys("SPH_DEG")
             else:
-                self._coord_sys = esmpy.CoordSys.CART
+                self._coord_sys = get_coord_sys("CART")
 
-            self.method_map = {
-                "bilinear": esmpy.RegridMethod.BILINEAR,
-                "conservative": esmpy.RegridMethod.CONSERVE,
-                "nearest_s2d": esmpy.RegridMethod.NEAREST_STOD,
-                "nearest_d2s": esmpy.RegridMethod.NEAREST_DTOS,
-                "patch": esmpy.RegridMethod.PATCH,
-            }
-
-            self.extrap_method_map = {
-                "nearest_s2d": esmpy.ExtrapMethod.NEAREST_STOD,
-                "nearest_idw": esmpy.ExtrapMethod.NEAREST_IDAVG,
-                "creep_fill": esmpy.ExtrapMethod.CREEP_FILL,
-            }
+            self.method_map = get_regrid_method_map()
+            self.extrap_method_map = get_extrap_method_map()
         else:
             self._coord_sys = None
             self.method_map = {}

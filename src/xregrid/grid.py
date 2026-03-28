@@ -7,6 +7,7 @@ import numpy as np
 import xarray as xr
 
 from .utils import _find_coord
+from .constants import get_coord_sys
 
 
 def _get_non_spatial_dims(ds: Union[xr.Dataset, xr.DataArray]) -> set[str]:
@@ -830,7 +831,7 @@ def _create_esmf_grid(
 
     if is_unstructured:
         if coord_sys is None:
-            coord_sys = esmpy.CoordSys.SPH_DEG
+            coord_sys = get_coord_sys("SPH_DEG")
 
         use_mesh = False
         if method == "conservative":
@@ -902,7 +903,7 @@ def _create_esmf_grid(
                 f"Method '{method}' requires connectivity information for unstructured grids. "
             )
         locstream = esmpy.LocStream(shape[0], coord_sys=coord_sys)
-        if coord_sys == esmpy.CoordSys.CART:
+        if coord_sys == get_coord_sys("CART"):
             locstream["ESMF:X"] = _normalize_longitudes(_to_degrees(lon)).values.astype(
                 np.float64
             )
@@ -958,7 +959,7 @@ def _create_esmf_grid(
             staggerlocs.append(esmpy.StaggerLoc.CORNER)
 
         if coord_sys is None:
-            coord_sys = esmpy.CoordSys.SPH_DEG if periodic else esmpy.CoordSys.CART
+            coord_sys = get_coord_sys("SPH_DEG") if periodic else get_coord_sys("CART")
 
         grid = esmpy.Grid(
             np.array(shape_f),

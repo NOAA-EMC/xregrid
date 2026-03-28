@@ -6,6 +6,7 @@ import numpy as np
 import xarray as xr
 
 from xregrid.core import _WORKER_CACHE, _setup_worker_cache
+from xregrid.constants import get_regrid_method_map, get_extrap_method_map
 from xregrid.grid import _create_esmf_grid
 
 
@@ -244,18 +245,8 @@ def _compute_chunk_weights(
             dst_field = esmpy.Field(dst_obj, name="dst")
 
         # 3. Setup regridding parameters
-        method_map = {
-            "bilinear": esmpy.RegridMethod.BILINEAR,
-            "conservative": esmpy.RegridMethod.CONSERVE,
-            "nearest_s2d": esmpy.RegridMethod.NEAREST_STOD,
-            "nearest_d2s": esmpy.RegridMethod.NEAREST_DTOS,
-            "patch": esmpy.RegridMethod.PATCH,
-        }
-        extrap_method_map = {
-            "nearest_s2d": esmpy.ExtrapMethod.NEAREST_STOD,
-            "nearest_idw": esmpy.ExtrapMethod.NEAREST_IDAVG,
-            "creep_fill": esmpy.ExtrapMethod.CREEP_FILL,
-        }
+        method_map = get_regrid_method_map()
+        extrap_method_map = get_extrap_method_map()
 
         regrid_kwargs = {
             "regrid_method": method_map[method],
