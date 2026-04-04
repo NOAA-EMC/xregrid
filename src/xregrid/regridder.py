@@ -994,8 +994,10 @@ class Regridder:
         if self._weights_matrix is None:
             raise RuntimeError("Weights have not been generated yet.")
 
-        if hasattr(self._weights_matrix, "key"):
+        is_remote = hasattr(self._weights_matrix, "key")
+        if is_remote:
             # Distributed lazy diagnostics
+            import dask
             import dask.array as da
             import dask.distributed
 
@@ -1007,11 +1009,14 @@ class Regridder:
             # Convert Future to Dask array to preserve laziness
             n_dst = int(np.prod(self._shape_target))
 
+            # Use dask.array.from_delayed to wrap the Future (or NumPy array)
+            # as a lazy Dask array to avoid driver-side blocking.
             weights_sum_da = da.from_delayed(
                 dask.delayed(self._total_weights), shape=(n_dst,), dtype=np.float64
             )
 
             weights_sum_2d = weights_sum_da.reshape(self._shape_target)
+            # Preserve laziness for the mask
             unmapped_2d = (weights_sum_2d == 0).astype(np.int8)
         else:
             # Eager diagnostics
@@ -1054,7 +1059,11 @@ class Regridder:
         if target_crs_obj:
             ds.attrs["crs"] = target_crs_obj.to_wkt()
 
-        update_history(ds, "Generated spatial diagnostics from Regridder weights.")
+        backend = "Distributed" if is_remote else "Eager"
+        update_history(
+            ds,
+            f"Generated spatial diagnostics from Regridder weights (backend={backend}).",
+        )
         return ds
 
     def quality_report(
@@ -1099,6 +1108,7 @@ class Regridder:
             if not skip_heavy:
                 # Compute nnz on cluster
                 try:
+                    import dask
                     import dask.array as da
                     import dask.distributed
 
@@ -1140,6 +1150,7 @@ class Regridder:
             unmapped_fraction = unmapped_count / n_dst
 
             # Handle min only where mapped to avoid NaN-related issues in min()
+            # Aero-robust: we use where to mask unmapped cells before computing min
             weight_sum_min = weights_sum.where(unmapped_mask == 0).min()
             weight_sum_max = weights_sum.max()
             weight_sum_mean = weights_sum.mean()
@@ -1159,6 +1170,8 @@ class Regridder:
                 )
             else:
                 # Keep as DataArrays for dataset format
+                # This ensures that if weights_sum and unmapped_mask are lazy,
+                # these metrics remain lazy within the report.
                 report.update(
                     {
                         "unmapped_count": unmapped_count,
@@ -1185,6 +1198,7 @@ class Regridder:
                     # Variable is a scalar or raw array (e.g. Dask array)
                     ds_vars[k] = ([], v, {"description": f"Quality metric: {k}"})
 
+            backend = "Distributed" if is_remote else "Eager"
             ds_report = xr.Dataset(
                 data_vars=ds_vars,
                 attrs={
@@ -1193,7 +1207,9 @@ class Regridder:
                     "provenance": "; ".join(self.provenance),
                 },
             )
-            update_history(ds_report, "Generated scientific quality report.")
+            update_history(
+                ds_report, f"Generated scientific quality report (backend={backend})."
+            )
             return ds_report
 
         return report
@@ -1823,8 +1839,9 @@ class Regridder:
             except ImportError:
                 esmpy_version = "unknown"
 
+            backend = "Distributed" if is_lazy else "Eager"
             history_msg = (
-                f"Regridded using xregrid.Regridder (ESMF/esmpy={esmpy_version}, "
+                f"Regridded using xregrid.Regridder (backend={backend}, ESMF/esmpy={esmpy_version}, "
                 f"method={self.method}, periodic={self.periodic}, skipna={skipna}, "
                 f"na_thres={na_thres}"
             )
@@ -2083,8 +2100,17 @@ class Regridder:
         except ImportError:
             esmpy_version = "unknown"
 
+        # For a Dataset, we check if any data variable is lazy
+        is_lazy = any(
+            is_dask_collection(da.data)
+            if is_dask_collection
+            else hasattr(da.data, "dask")
+            for da in ds_in.data_vars.values()
+        )
+        backend = "Distributed" if is_lazy else "Eager"
+
         history_msg = (
-            f"Regridded Dataset using xregrid.Regridder (ESMF/esmpy={esmpy_version}, "
+            f"Regridded Dataset using xregrid.Regridder (backend={backend}, ESMF/esmpy={esmpy_version}, "
             f"method={self.method}, periodic={self.periodic}, skipna={skipna}, "
             f"na_thres={na_thres}"
         )
