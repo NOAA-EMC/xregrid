@@ -12,7 +12,7 @@ XRegrid is a high-performance regridding library that builds on top of ESMF (Ear
 - **Correct ESMF Integration**: Native support for rectilinear, curvilinear, and unstructured grids.
 - **Broad Format Support**: Automatic handling of MPAS, UGRID, SCRIP, and atmospheric model formats (CAM-SE/MUSICA, CAM-fv).
 - **Unstructured Support**: Robust handling of unstructured datasets, including **conservative regridding** via mesh triangulation.
-- **Dask Integration**: Seamless parallel processing with Dask arrays, including **parallel weight generation** for all grid types.
+- **Dask & Cubed Integration**: Seamless parallel processing with Dask and Cubed arrays, including **parallel weight generation** via Dask.
 - **NOAA RDHPCS Support**: Built-in helpers for Hera, Jet, Gaea, and Ursa via `dask-jobqueue`.
 - **Memory Efficient**: Optimized sparse matrix operations using scipy.
 - **xarray Compatible**: Native support for xarray datasets and data arrays.

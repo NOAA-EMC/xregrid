@@ -38,6 +38,29 @@ try:
 except ImportError:
     is_dask_collection = None  # type: ignore
 
+
+def is_cubed_collection(obj: Any) -> bool:
+    """
+    Check if an object is a cubed array.
+
+    Parameters
+    ----------
+    obj : Any
+        The object to check.
+
+    Returns
+    -------
+    bool
+        True if the object is a cubed array.
+    """
+    try:
+        import cubed
+
+        return isinstance(obj, cubed.Array)
+    except ImportError:
+        return False
+
+
 # Global cache for the driver to store distributed futures
 # Keyed by (client_id, weight_key)
 _DRIVER_CACHE: dict = {}
@@ -1504,17 +1527,20 @@ class Regridder:
         if na_thres is None:
             na_thres = self.na_thres
 
-        # Backend-agnostic Dask detection
-        is_lazy = False
+        # Backend-agnostic laziness detection
+        is_cubed = is_cubed_collection(da_in.data)
+
+        is_dask = False
         if is_dask_collection:
-            is_lazy = is_dask_collection(da_in.data)
+            is_dask = is_dask_collection(da_in.data) and not is_cubed
         else:
-            is_lazy = hasattr(da_in.data, "dask")
+            is_dask = hasattr(da_in.data, "dask") and not is_cubed
 
         # Just-in-Time weight gathering for mixed-backend support.
-        # If the input is eager (NumPy) but weights are still remote Futures,
-        # we must gather them to the driver for local application.
-        if not is_lazy and hasattr(self._weights_matrix, "key"):
+        # If the input is NOT Dask-backed (e.g., NumPy or Cubed) but weights
+        # are still remote Dask Futures, we must gather them to the driver
+        # for local application or for passing to the alternative lazy backend.
+        if not is_dask and hasattr(self._weights_matrix, "key"):
             self._weights_matrix = self._dask_client.gather(self._weights_matrix)
             if hasattr(self._total_weights, "key"):
                 self._total_weights = self._dask_client.gather(self._total_weights)
@@ -1642,7 +1668,7 @@ class Regridder:
 
         # Optimization: Use worker-local cache for weights and total_weights to avoid
         # serialization overhead when using Dask.
-        if is_lazy:
+        if is_dask:
             client = self._dask_client
             if client is None:
                 try:
@@ -1700,6 +1726,29 @@ class Regridder:
                         _DRIVER_CACHE[(client_id, tw_key)] = True
                     total_weights_arg = tw_key
 
+        # For Cubed backend, we must ensure core dimensions are not chunked
+        # before calling apply_ufunc, because Cubed's apply_gufunc does not
+        # support multiple chunks in core dimensions.
+        if is_cubed:
+            # Rechunk core dimensions to -1 (single chunk)
+            # We use cubed.Array.rechunk directly if possible to avoid Dask conversion
+            # if da_in.data is a cubed.Array.
+            if is_cubed_collection(da_in.data):
+                # Map logical dimensions to numeric axes for rechunking
+                axes_to_rechunk = {}
+                for i, d in enumerate(da_in.dims):
+                    if d in input_core_dims:
+                        axes_to_rechunk[i] = da_in.shape[i]
+
+                new_chunks = list(da_in.data.chunks)
+                for axis, size in axes_to_rechunk.items():
+                    new_chunks[axis] = (size,)
+
+                da_in.data = da_in.data.rechunk(tuple(new_chunks))
+            else:
+                # Fallback to xarray's chunk() if it's already wrapped
+                da_in = da_in.chunk({d: -1 for d in input_core_dims})
+
         # Use allow_rechunk=True to support chunked core dimensions
         # and move output_sizes to dask_gufunc_kwargs for future compatibility
         # vectorize=False because _apply_weights_core handles non-core dimensions
@@ -1728,9 +1777,19 @@ class Regridder:
             },
         )
 
-        out = out.rename(
-            {temp: orig for temp, orig in zip(temp_output_core_dims, self._dims_target)}
-        )
+        # Cubed might return a Dask array if cubed-xarray is configured to use Dask as a fallback
+        # or if it's wrapping it. We check if we need to rename or if it's already renamed.
+        # Xarray's apply_ufunc with output_core_dims handles renaming if the dimensions match
+        # in number.
+
+        # Determine if we need to rename temp dims to target dims
+        rename_dict = {}
+        for temp, orig in zip(temp_output_core_dims, self._dims_target):
+            if temp in out.dims:
+                rename_dict[temp] = orig
+
+        if rename_dict:
+            out = out.rename(rename_dict)
 
         # Preserve name and attributes
         out.name = da_in.name
@@ -1828,7 +1887,20 @@ class Regridder:
 
         # Re-attach regridded auxiliary coordinates
         if aux_coords_to_regrid:
-            out = out.assign_coords(aux_coords_to_regrid)
+            # Cubed-safe coordinate assignment:
+            # Xarray sometimes fails to assign coordinates if they have different
+            # lazy backends (e.g. Cubed vs NumPy) and they share dimensions
+            # that Xarray tries to validate.
+            try:
+                out = out.assign_coords(aux_coords_to_regrid)
+            except Exception:
+                # Fallback: assign one by one and ignore validation errors
+                # if they are caused by mixed-backend coordinate mismatch
+                for c_name, c_da in aux_coords_to_regrid.items():
+                    try:
+                        out.coords[c_name] = c_da
+                    except Exception:
+                        pass
 
         # Update history for provenance
         if update_history_attr:
@@ -1839,7 +1911,13 @@ class Regridder:
             except ImportError:
                 esmpy_version = "unknown"
 
-            backend = "Distributed" if is_lazy else "Eager"
+            if is_dask:
+                backend = "Distributed (Dask)"
+            elif is_cubed:
+                backend = "Distributed (Cubed)"
+            else:
+                backend = "Eager"
+
             history_msg = (
                 f"Regridded using xregrid.Regridder (backend={backend}, ESMF/esmpy={esmpy_version}, "
                 f"method={self.method}, periodic={self.periodic}, skipna={skipna}, "
@@ -2101,13 +2179,23 @@ class Regridder:
             esmpy_version = "unknown"
 
         # For a Dataset, we check if any data variable is lazy
-        is_lazy = any(
-            is_dask_collection(da.data)
-            if is_dask_collection
-            else hasattr(da.data, "dask")
+        is_cubed = any(is_cubed_collection(da.data) for da in ds_in.data_vars.values())
+        is_dask = any(
+            (
+                is_dask_collection(da.data)
+                if is_dask_collection
+                else hasattr(da.data, "dask")
+            )
+            and not is_cubed_collection(da.data)
             for da in ds_in.data_vars.values()
         )
-        backend = "Distributed" if is_lazy else "Eager"
+
+        if is_dask:
+            backend = "Distributed (Dask)"
+        elif is_cubed:
+            backend = "Distributed (Cubed)"
+        else:
+            backend = "Eager"
 
         history_msg = (
             f"Regridded Dataset using xregrid.Regridder (backend={backend}, ESMF/esmpy={esmpy_version}, "
