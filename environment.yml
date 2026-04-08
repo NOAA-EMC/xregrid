@@ -12,8 +12,6 @@ dependencies:
   - numpy
   - scipy
   - dask
-  - cubed
-  - cubed-xarray
   - netcdf4
   - pandas
   - matplotlib

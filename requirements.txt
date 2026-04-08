@@ -3,8 +3,6 @@ xarray
 numpy
 scipy
 dask
-cubed
-cubed-xarray
 netCDF4
 esmpy
 cf-xarray

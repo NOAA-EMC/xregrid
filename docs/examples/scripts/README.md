@@ -24,3 +24,6 @@ A comparison of code complexity between raw ESMPy and the XRegrid API.
 
 ### [Mesh Wireframe Visualization](plot_mesh_wireframe.py)
 Visualize the cell structure of unstructured meshes (MPAS, UGRID, SCRIP) on map projections.
+
+### [Multi-VTK Mesh Overlay](plot_multi_vtk_mesh.py)
+Load and overlay multiple VTK mesh files on a single map to compare resolutions or nesting.

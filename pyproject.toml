@@ -16,8 +16,6 @@ dependencies = [
     "numpy",
     "scipy",
     "dask",
-    "cubed",
-    "cubed-xarray",
     "netCDF4",
     "esmpy",
     "cf-xarray",
@@ -47,8 +45,12 @@ viz = [
     "hvplot",
     "geoviews",
 ]
+cubed = [
+    "cubed",
+    "cubed-xarray",
+]
 full = [
-    "xregrid[test,viz]",
+    "xregrid[test,viz,cubed]",
     "xesmf",
     "uxarray",
 ]

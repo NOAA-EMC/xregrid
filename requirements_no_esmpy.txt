@@ -4,8 +4,6 @@ xarray
 numpy
 scipy
 dask
-cubed
-cubed-xarray
 netCDF4
 cf-xarray
 pyproj
