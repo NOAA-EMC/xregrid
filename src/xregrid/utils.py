@@ -279,7 +279,7 @@ def load_esmf_file(filepath: str) -> xr.Dataset:
 
 def load_vtk_mesh(filepath: str) -> xr.Dataset:
     """
-    Load an ESMF VTK legacy unstructured grid file into an xarray Dataset.
+    Load ESMF VTK legacy unstructured grid file(s) into an xarray Dataset.
 
     Parses the ASCII legacy VTK format (``DATASET UNSTRUCTURED_GRID``)
     as written by ESMF and converts it into a UGRID-style
@@ -287,10 +287,15 @@ def load_vtk_mesh(filepath: str) -> xr.Dataset:
     ``node_lat``.  The resulting dataset can be passed directly to
     ``Regridder`` or ``plot_mesh``.
 
+    When ``filepath`` is a directory, all ``.vtk`` files inside it are
+    loaded and merged into a single mesh.  This handles the common ESMF
+    pattern of writing one VTK file per MPI rank.
+
     Parameters
     ----------
     filepath : str
-        Path to a ``.vtk`` file in legacy ASCII format.
+        Path to a ``.vtk`` file, or a directory containing multiple
+        ``.vtk`` files that together form a single mesh.
 
     Returns
     -------
@@ -305,14 +310,43 @@ def load_vtk_mesh(filepath: str) -> xr.Dataset:
     Raises
     ------
     ValueError
-        If the file cannot be parsed as a VTK legacy unstructured grid.
+        If the file(s) cannot be parsed as VTK legacy unstructured grids,
+        or if a directory contains no ``.vtk`` files.
 
     Examples
     --------
     >>> from xregrid.utils import load_vtk_mesh
     >>> ds = load_vtk_mesh("esmf_mesh.vtk")
-    >>> ds
-    <xarray.Dataset> ...
+
+    >>> # Load a directory of per-rank VTK files as one mesh
+    >>> ds = load_vtk_mesh("output/mesh_parts/")
+    """
+    import glob
+
+    if os.path.isdir(filepath):
+        vtk_files = sorted(glob.glob(os.path.join(filepath, "*.vtk")))
+        if not vtk_files:
+            raise ValueError(
+                f"Directory '{filepath}' contains no .vtk files."
+            )
+        return _merge_vtk_files(vtk_files)
+
+    return _load_single_vtk(filepath)
+
+
+def _load_single_vtk(filepath: str) -> xr.Dataset:
+    """
+    Parse a single VTK legacy file into a UGRID-style Dataset.
+
+    Parameters
+    ----------
+    filepath : str
+        Path to a ``.vtk`` file.
+
+    Returns
+    -------
+    xr.Dataset
+        UGRID-style dataset.
     """
     with open(filepath, "r") as f:
         lines = f.readlines()
@@ -426,6 +460,114 @@ def load_vtk_mesh(filepath: str) -> xr.Dataset:
 
     update_history(
         ds, f"Loaded VTK mesh from {os.path.basename(filepath)} via xregrid."
+    )
+
+    return ds
+
+
+def _merge_vtk_files(vtk_files: list) -> xr.Dataset:
+    """
+    Merge multiple per-rank VTK files into a single UGRID Dataset.
+
+    Each file has its own local point numbering.  This function
+    concatenates all points, re-indexes the connectivity, and
+    deduplicates shared nodes.
+
+    Parameters
+    ----------
+    vtk_files : list of str
+        Sorted list of ``.vtk`` file paths.
+
+    Returns
+    -------
+    xr.Dataset
+        Merged UGRID-style dataset.
+    """
+    all_points = []
+    all_cells = []
+    node_offset = 0
+
+    for vf in vtk_files:
+        ds_part = _load_single_vtk(vf)
+        lon = ds_part["node_lon"].values
+        lat = ds_part["node_lat"].values
+        conn = ds_part["face_node_connectivity"].values.copy()
+
+        # Offset connectivity indices (skip fill values)
+        mask = conn != -1
+        conn[mask] += node_offset
+
+        all_points.append(np.column_stack([lon, lat]))
+        all_cells.append(conn)
+        node_offset += len(lon)
+
+    # Concatenate
+    points = np.concatenate(all_points, axis=0)
+
+    # Pad connectivity arrays to the same max width
+    max_verts = max(c.shape[1] for c in all_cells)
+    padded = []
+    for c in all_cells:
+        if c.shape[1] < max_verts:
+            pad = np.full(
+                (c.shape[0], max_verts - c.shape[1]), -1, dtype=np.int32
+            )
+            c = np.concatenate([c, pad], axis=1)
+        padded.append(c)
+    conn_all = np.concatenate(padded, axis=0)
+
+    # Deduplicate shared nodes
+    coords_rounded = np.round(points, 8)
+    _, unique_idx, inverse_idx = np.unique(
+        coords_rounded, axis=0, return_index=True, return_inverse=True
+    )
+
+    node_lon = points[unique_idx, 0]
+    node_lat = points[unique_idx, 1]
+
+    # Remap connectivity through the dedup mapping
+    mask = conn_all != -1
+    conn_all[mask] = inverse_idx[conn_all[mask]]
+
+    ds = xr.Dataset(
+        {
+            "mesh": (
+                [],
+                np.int32(0),
+                {
+                    "cf_role": "mesh_topology",
+                    "topology_dimension": 2,
+                    "node_coordinates": "node_lon node_lat",
+                    "face_node_connectivity": "face_node_connectivity",
+                },
+            ),
+            "face_node_connectivity": (
+                ["nFaces", "nMaxVerts"],
+                conn_all,
+                {
+                    "cf_role": "face_node_connectivity",
+                    "start_index": 0,
+                    "_FillValue": -1,
+                },
+            ),
+        },
+        coords={
+            "node_lon": (
+                ["nNodes"],
+                node_lon,
+                {"units": "degrees_east", "standard_name": "longitude"},
+            ),
+            "node_lat": (
+                ["nNodes"],
+                node_lat,
+                {"units": "degrees_north", "standard_name": "latitude"},
+            ),
+        },
+    )
+
+    update_history(
+        ds,
+        f"Merged {len(vtk_files)} VTK files into single mesh via xregrid.",
     )
 
     return ds

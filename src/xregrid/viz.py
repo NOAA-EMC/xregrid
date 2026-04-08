@@ -4,6 +4,7 @@ import warnings
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 import xarray as xr
+import os
 
 from xregrid.utils import get_crs_info, _find_coord
 
@@ -917,7 +918,12 @@ def plot_mesh(
 
     # --- Extract cell polygons from the mesh connectivity ---
     if isinstance(ds, str):
-        polygons = _read_vtk_polygons(ds)
+        if os.path.isdir(ds):
+            from xregrid.utils import load_vtk_mesh
+
+            polygons = _extract_cell_polygons(load_vtk_mesh(ds))
+        else:
+            polygons = _read_vtk_polygons(ds)
     else:
         polygons = _extract_cell_polygons(ds)
 
