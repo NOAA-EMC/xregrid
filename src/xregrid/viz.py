@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 import xarray as xr
 
@@ -826,3 +826,404 @@ def _get_weight_row_da(regridder: "Regridder", row_idx: int) -> xr.DataArray:
         name="weights",
     )
     return da_weights
+
+
+def plot_mesh(
+    ds: "Union[xr.Dataset, str]",
+    projection: Any = None,
+    transform: Any = None,
+    title: Optional[str] = None,
+    edgecolor: str = "black",
+    facecolor: str = "none",
+    linewidth: float = 0.3,
+    alpha: float = 1.0,
+    ax: Any = None,
+    figsize: tuple = (12, 8),
+    **kwargs: Any,
+) -> Any:
+    """
+    Plot the wireframe of an unstructured mesh (MPAS, UGRID, SCRIP, VTK).
+
+    Draws each cell as a polygon outline on a Cartopy-projected map,
+    producing images similar to the classic MPAS variable-resolution
+    mesh visualizations.
+
+    Parameters
+    ----------
+    ds : xr.Dataset or str
+        Dataset containing unstructured mesh information (MPAS, UGRID,
+        or SCRIP conventions), or a path to a VTK legacy file
+        (``DATASET UNSTRUCTURED_GRID``) as written by ESMF.
+    projection : cartopy.crs.Projection, optional
+        Map projection for the axes. Defaults to ``ccrs.Orthographic``
+        (globe view) if cartopy is available.
+    transform : cartopy.crs.Projection, optional
+        Coordinate reference for the vertex data. Defaults to
+        ``ccrs.PlateCarree()``.
+    title : str, optional
+        Plot title.
+    edgecolor : str, default "black"
+        Color of cell edges.
+    facecolor : str, default "none"
+        Fill color of cells. Use ``"none"`` for wireframe.
+    linewidth : float, default 0.3
+        Width of cell edges.
+    alpha : float, default 1.0
+        Transparency of the mesh polygons.
+    ax : matplotlib.axes.Axes, optional
+        Pre-existing GeoAxes to draw on. A new figure is created if
+        ``None``.
+    figsize : tuple, default (12, 8)
+        Figure size when creating a new figure.
+    **kwargs : Any
+        Additional keyword arguments passed to
+        ``matplotlib.collections.PolyCollection``.
+
+    Returns
+    -------
+    matplotlib.collections.PolyCollection
+        The collection of cell polygons added to the axes.
+
+    Raises
+    ------
+    ImportError
+        If matplotlib or cartopy is not installed.
+    ValueError
+        If the dataset does not contain recognizable mesh connectivity.
+
+    Examples
+    --------
+    >>> import xarray as xr
+    >>> from xregrid.viz import plot_mesh
+    >>> ds = xr.open_dataset("mpas_mesh.nc")
+    >>> plot_mesh(ds, title="MPAS Variable-Resolution Mesh")
+
+    >>> # From an ESMF VTK file
+    >>> plot_mesh("esmf_mesh.vtk", title="ESMF Mesh")
+    """
+    if plt is None:
+        raise ImportError(
+            "Matplotlib is required for plot_mesh. "
+            "Install it with `pip install matplotlib`."
+        )
+    if ccrs is None:
+        raise ImportError(
+            "Cartopy is required for plot_mesh. "
+            "Install it with `pip install cartopy`."
+        )
+
+    import numpy as np
+    from matplotlib.collections import PolyCollection
+
+    # --- Extract cell polygons from the mesh connectivity ---
+    if isinstance(ds, str):
+        polygons = _read_vtk_polygons(ds)
+    else:
+        polygons = _extract_cell_polygons(ds)
+
+    # --- Set up map projection ---
+    if transform is None:
+        transform = ccrs.PlateCarree()
+    if projection is None:
+        projection = ccrs.Orthographic(central_longitude=0, central_latitude=0)
+
+    if ax is None:
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(1, 1, 1, projection=projection)
+
+    # Use the axes' actual projection for coordinate transforms
+    ax_projection = ax.projection if hasattr(ax, "projection") else projection
+
+    # Transform vertices into the target projection
+    projected_polys = []
+    for poly in polygons:
+        pts = ax_projection.transform_points(transform, poly[:, 0], poly[:, 1])
+        # Filter out polygons that contain non-finite projected coords
+        if np.all(np.isfinite(pts[:, :2])):
+            projected_polys.append(pts[:, :2])
+
+    collection = PolyCollection(
+        projected_polys,
+        edgecolors=edgecolor,
+        facecolors=facecolor,
+        linewidths=linewidth,
+        alpha=alpha,
+        transform=ax.transData,
+        **kwargs,
+    )
+    ax.add_collection(collection)
+
+    ax.set_global()
+    ax.coastlines(linewidth=0.5, color="gray")
+
+    if title is None:
+        title = "Unstructured Mesh"
+    ax.set_title(title)
+
+    return collection
+
+
+def _extract_cell_polygons(ds: xr.Dataset) -> list:
+    """
+    Build a list of cell polygons from an unstructured mesh dataset.
+
+    Each polygon is an (N, 2) ndarray of ``[lon, lat]`` vertices in
+    degrees. Supports MPAS, UGRID, and SCRIP conventions.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset with mesh connectivity information.
+
+    Returns
+    -------
+    list of np.ndarray
+        Each element is an (N, 2) array of vertex coordinates for one
+        cell polygon.
+
+    Raises
+    ------
+    ValueError
+        If no supported mesh convention is detected.
+    """
+    import numpy as np
+    from xregrid.grid import (
+        _to_degrees,
+        _clip_latitudes,
+        _normalize_longitudes,
+        _get_non_spatial_dims,
+    )
+
+    non_spatial_dims = _get_non_spatial_dims(ds)
+
+    # --- MPAS ---
+    if "verticesOnCell" in ds and "latVertex" in ds and "lonVertex" in ds:
+        v_lat = ds["latVertex"]
+        v_lon = ds["lonVertex"]
+        v_conn = ds["verticesOnCell"]
+
+        for name, da in [("lat", v_lat), ("lon", v_lon), ("conn", v_conn)]:
+            isel_dict = {d: 0 for d in non_spatial_dims if d in da.dims}
+            if isel_dict:
+                if name == "lat":
+                    v_lat = v_lat.isel(isel_dict, drop=True)
+                elif name == "lon":
+                    v_lon = v_lon.isel(isel_dict, drop=True)
+                else:
+                    v_conn = v_conn.isel(isel_dict, drop=True)
+
+        node_lat = _clip_latitudes(_to_degrees(v_lat)).values
+        node_lon = _normalize_longitudes(_to_degrees(v_lon)).values
+        conn_raw = v_conn.values  # 1-based
+        n_edges = (
+            ds["nEdgesOnCell"].values
+            if "nEdgesOnCell" in ds
+            else np.full(conn_raw.shape[0], conn_raw.shape[1])
+        )
+
+        polygons = []
+        for i in range(conn_raw.shape[0]):
+            ne = int(n_edges[i])
+            vidx = conn_raw[i, :ne] - 1  # to 0-based
+            lons = node_lon[vidx]
+            lats = node_lat[vidx]
+            # Handle dateline wrapping: if span > 180°, shift
+            if lons.max() - lons.min() > 180:
+                lons = np.where(lons < 180, lons + 360, lons)
+            polygons.append(np.column_stack([lons, lats]))
+        return polygons
+
+    # --- UGRID ---
+    conn_var = None
+    mesh_var = None
+    for var in ds.variables:
+        if ds[var].attrs.get("cf_role") == "mesh_topology":
+            mesh_var = var
+            break
+    if mesh_var:
+        conn_var = ds[mesh_var].attrs.get("face_node_connectivity")
+    if not conn_var:
+        for var in ds.variables:
+            if ds[var].attrs.get("cf_role") == "face_node_connectivity":
+                conn_var = var
+                break
+    if not conn_var and "face_node_connectivity" in ds:
+        conn_var = "face_node_connectivity"
+
+    if conn_var:
+        # Discover node coordinate variables
+        node_lon_var = node_lat_var = None
+        if mesh_var and mesh_var in ds:
+            nc_attr = ds[mesh_var].attrs.get("node_coordinates", "").split()
+            if len(nc_attr) >= 2:
+                node_lon_var, node_lat_var = nc_attr[0], nc_attr[1]
+        if not node_lon_var:
+            for v in ds.variables:
+                if ds[v].attrs.get("standard_name") == "longitude":
+                    node_lon_var = v
+                if ds[v].attrs.get("standard_name") == "latitude":
+                    node_lat_var = v
+        if not node_lon_var:
+            node_lon_var = "node_lon" if "node_lon" in ds else None
+            node_lat_var = "node_lat" if "node_lat" in ds else None
+
+        if node_lon_var and node_lat_var:
+            v_lon = ds[node_lon_var]
+            v_lat = ds[node_lat_var]
+            v_conn = ds[conn_var]
+            for name, da in [("lon", v_lon), ("lat", v_lat), ("conn", v_conn)]:
+                isel_dict = {d: 0 for d in non_spatial_dims if d in da.dims}
+                if isel_dict:
+                    if name == "lon":
+                        v_lon = v_lon.isel(isel_dict, drop=True)
+                    elif name == "lat":
+                        v_lat = v_lat.isel(isel_dict, drop=True)
+                    else:
+                        v_conn = v_conn.isel(isel_dict, drop=True)
+
+            node_lon = _normalize_longitudes(_to_degrees(v_lon)).values
+            node_lat = _clip_latitudes(_to_degrees(v_lat)).values
+            conn_raw = v_conn.values
+            start_index = int(ds[conn_var].attrs.get("start_index", 0))
+            fill_value = ds[conn_var].attrs.get("_FillValue", -1)
+
+            polygons = []
+            for i in range(conn_raw.shape[0]):
+                row = conn_raw[i]
+                valid = row[row != fill_value] - start_index
+                if len(valid) < 3:
+                    continue
+                lons = node_lon[valid]
+                lats = node_lat[valid]
+                if lons.max() - lons.min() > 180:
+                    lons = np.where(lons < 180, lons + 360, lons)
+                polygons.append(np.column_stack([lons, lats]))
+            return polygons
+
+    # --- SCRIP ---
+    if "lat_b" in ds and "lon_b" in ds and ds["lat_b"].ndim == 2:
+        v_lat_b = ds["lat_b"]
+        v_lon_b = ds["lon_b"]
+        for name, da in [("lat", v_lat_b), ("lon", v_lon_b)]:
+            isel_dict = {d: 0 for d in non_spatial_dims if d in da.dims}
+            if isel_dict:
+                if name == "lat":
+                    v_lat_b = v_lat_b.isel(isel_dict, drop=True)
+                else:
+                    v_lon_b = v_lon_b.isel(isel_dict, drop=True)
+
+        lat_b = _clip_latitudes(_to_degrees(v_lat_b)).values
+        lon_b = _normalize_longitudes(_to_degrees(v_lon_b)).values
+
+        polygons = []
+        for i in range(lat_b.shape[0]):
+            lons = lon_b[i]
+            lats = lat_b[i]
+            if lons.max() - lons.min() > 180:
+                lons = np.where(lons < 180, lons + 360, lons)
+            polygons.append(np.column_stack([lons, lats]))
+        return polygons
+
+    raise ValueError(
+        "Could not detect unstructured mesh connectivity in the dataset. "
+        "Supported conventions: MPAS (verticesOnCell), UGRID "
+        "(face_node_connectivity), SCRIP (lat_b/lon_b)."
+    )
+
+
+def _read_vtk_polygons(path: str) -> list:
+    """
+    Parse a VTK legacy unstructured grid file into cell polygons.
+
+    Reads the ASCII legacy VTK format (``DATASET UNSTRUCTURED_GRID``)
+    as written by ESMF's ``Mesh._write_`` method. Points are
+    interpreted as ``(lon, lat, [z])`` in degrees.
+
+    Parameters
+    ----------
+    path : str
+        Path to a ``.vtk`` file.
+
+    Returns
+    -------
+    list of np.ndarray
+        Each element is an ``(N, 2)`` array of ``[lon, lat]`` vertex
+        coordinates for one cell polygon.
+
+    Raises
+    ------
+    ValueError
+        If the file is not a valid VTK legacy unstructured grid.
+    """
+    import numpy as np
+
+    with open(path, "r") as f:
+        lines = f.readlines()
+
+    # --- Parse POINTS ---
+    points = None
+    cells_raw = []
+    cell_types = []
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+
+        if line.startswith("POINTS"):
+            parts = line.split()
+            n_points = int(parts[1])
+            coords = []
+            i += 1
+            while len(coords) < n_points * 3:
+                coords.extend(lines[i].strip().split())
+                i += 1
+            points = np.array(coords, dtype=np.float64).reshape(n_points, 3)
+            continue
+
+        if line.startswith("CELLS"):
+            parts = line.split()
+            n_cells = int(parts[1])
+            i += 1
+            for _ in range(n_cells):
+                vals = list(map(int, lines[i].strip().split()))
+                n_verts = vals[0]
+                cells_raw.append(vals[1 : 1 + n_verts])
+                i += 1
+            continue
+
+        if line.startswith("CELL_TYPES"):
+            n_types = int(line.split()[1])
+            i += 1
+            for _ in range(n_types):
+                cell_types.append(int(lines[i].strip()))
+                i += 1
+            continue
+
+        i += 1
+
+    if points is None or len(cells_raw) == 0:
+        raise ValueError(
+            f"Could not parse VTK file '{path}'. Expected a legacy "
+            "UNSTRUCTURED_GRID with POINTS and CELLS sections."
+        )
+
+    # VTK cell types for 2D polygonal cells:
+    # 5 = VTK_TRIANGLE, 7 = VTK_POLYGON, 9 = VTK_QUAD
+    poly_types = {5, 7, 9}
+
+    # Points are (lon, lat, z) — take first two columns
+    lons = points[:, 0]
+    lats = points[:, 1]
+
+    polygons = []
+    for idx, cell_verts in enumerate(cells_raw):
+        # Skip non-polygonal cells if cell_types are present
+        if cell_types and cell_types[idx] not in poly_types:
+            continue
+        vidx = np.array(cell_verts)
+        cell_lons = lons[vidx].copy()
+        cell_lats = lats[vidx].copy()
+        if cell_lons.max() - cell_lons.min() > 180:
+            cell_lons = np.where(cell_lons < 180, cell_lons + 360, cell_lons)
+        polygons.append(np.column_stack([cell_lons, cell_lats]))
+
+    return polygons

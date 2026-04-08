@@ -277,6 +277,160 @@ def load_esmf_file(filepath: str) -> xr.Dataset:
     return ds
 
 
+def load_vtk_mesh(filepath: str) -> xr.Dataset:
+    """
+    Load an ESMF VTK legacy unstructured grid file into an xarray Dataset.
+
+    Parses the ASCII legacy VTK format (``DATASET UNSTRUCTURED_GRID``)
+    as written by ESMF and converts it into a UGRID-style
+    ``xr.Dataset`` with ``face_node_connectivity``, ``node_lon``, and
+    ``node_lat``.  The resulting dataset can be passed directly to
+    ``Regridder`` or ``plot_mesh``.
+
+    Parameters
+    ----------
+    filepath : str
+        Path to a ``.vtk`` file in legacy ASCII format.
+
+    Returns
+    -------
+    xr.Dataset
+        UGRID-style dataset with:
+
+        - ``node_lon`` / ``node_lat`` — vertex coordinates in degrees.
+        - ``face_node_connectivity`` — (nFaces, maxVerts) connectivity
+          array with ``start_index=0`` and ``_FillValue=-1``.
+        - ``mesh`` — scalar topology variable with ``cf_role``.
+
+    Raises
+    ------
+    ValueError
+        If the file cannot be parsed as a VTK legacy unstructured grid.
+
+    Examples
+    --------
+    >>> from xregrid.utils import load_vtk_mesh
+    >>> ds = load_vtk_mesh("esmf_mesh.vtk")
+    >>> ds
+    <xarray.Dataset> ...
+    """
+    with open(filepath, "r") as f:
+        lines = f.readlines()
+
+    points = None
+    cells_raw: list = []
+    cell_types: list = []
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+
+        if line.startswith("POINTS"):
+            parts = line.split()
+            n_points = int(parts[1])
+            coords: list = []
+            i += 1
+            while len(coords) < n_points * 3:
+                coords.extend(lines[i].strip().split())
+                i += 1
+            points = np.array(coords, dtype=np.float64).reshape(n_points, 3)
+            continue
+
+        if line.startswith("CELLS"):
+            parts = line.split()
+            n_cells = int(parts[1])
+            i += 1
+            for _ in range(n_cells):
+                vals = list(map(int, lines[i].strip().split()))
+                n_verts = vals[0]
+                cells_raw.append(vals[1 : 1 + n_verts])
+                i += 1
+            continue
+
+        if line.startswith("CELL_TYPES"):
+            n_types = int(line.split()[1])
+            i += 1
+            for _ in range(n_types):
+                cell_types.append(int(lines[i].strip()))
+                i += 1
+            continue
+
+        i += 1
+
+    if points is None or len(cells_raw) == 0:
+        raise ValueError(
+            f"Could not parse VTK file '{filepath}'. Expected a legacy "
+            "UNSTRUCTURED_GRID with POINTS and CELLS sections."
+        )
+
+    # Filter to 2D polygonal cell types only
+    poly_types = {5, 7, 9}  # TRI, POLYGON, QUAD
+    if cell_types:
+        filtered = [
+            c for c, t in zip(cells_raw, cell_types) if t in poly_types
+        ]
+    else:
+        filtered = cells_raw
+
+    if not filtered:
+        raise ValueError(
+            f"VTK file '{filepath}' contains no 2D polygonal cells "
+            "(expected VTK types 5, 7, or 9)."
+        )
+
+    # Build padded connectivity array
+    max_verts = max(len(c) for c in filtered)
+    n_faces = len(filtered)
+    conn = np.full((n_faces, max_verts), -1, dtype=np.int32)
+    for j, cell in enumerate(filtered):
+        conn[j, : len(cell)] = cell
+
+    # Points are (lon, lat, z) — take first two columns
+    node_lon = points[:, 0]
+    node_lat = points[:, 1]
+
+    ds = xr.Dataset(
+        {
+            "mesh": (
+                [],
+                np.int32(0),
+                {
+                    "cf_role": "mesh_topology",
+                    "topology_dimension": 2,
+                    "node_coordinates": "node_lon node_lat",
+                    "face_node_connectivity": "face_node_connectivity",
+                },
+            ),
+            "face_node_connectivity": (
+                ["nFaces", "nMaxVerts"],
+                conn,
+                {
+                    "cf_role": "face_node_connectivity",
+                    "start_index": 0,
+                    "_FillValue": -1,
+                },
+            ),
+        },
+        coords={
+            "node_lon": (
+                ["nNodes"],
+                node_lon,
+                {"units": "degrees_east", "standard_name": "longitude"},
+            ),
+            "node_lat": (
+                ["nNodes"],
+                node_lat,
+                {"units": "degrees_north", "standard_name": "latitude"},
+            ),
+        },
+    )
+
+    update_history(
+        ds, f"Loaded VTK mesh from {os.path.basename(filepath)} via xregrid."
+    )
+
+    return ds
+
+
 def get_crs_info(obj: Union[xr.DataArray, xr.Dataset]) -> Optional[Any]:
     """
     Detect CRS information from an xarray object's attributes or encoding.

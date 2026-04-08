@@ -21,3 +21,6 @@ Efficient workflows using weight reuse to speed up repeated regridding operation
 
 ### [ESMPy vs. XRegrid](plot_esmpy_comparison.py)
 A comparison of code complexity between raw ESMPy and the XRegrid API.
+
+### [Mesh Wireframe Visualization](plot_mesh_wireframe.py)
+Visualize the cell structure of unstructured meshes (MPAS, UGRID, SCRIP) on map projections.

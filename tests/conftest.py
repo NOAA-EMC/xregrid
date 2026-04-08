@@ -206,6 +206,14 @@ def setup_esmpy_mock():
     return mock_esmpy
 
 
+import platform
+
+
+def _is_apple_silicon() -> bool:
+    """Detect Apple Silicon (arm64 macOS) where esmpy Mesh crashes."""
+    return sys.platform == "darwin" and platform.machine() == "arm64"
+
+
 try:
     import esmpy
 
@@ -213,8 +221,19 @@ try:
     if hasattr(esmpy, "_is_mock"):
         raise ImportError("Already mocked")
     esmpy.Manager(debug=False)
-    HAS_REAL_ESMF = True
-    print("\n--- Real ESMF detected in conftest.py ---")
+
+    if _is_apple_silicon():
+        # esmpy 8.8.x Mesh.add_elements aborts on Apple Silicon.
+        # Import succeeds but Mesh creation segfaults, so we mock.
+        HAS_REAL_ESMF = False
+        print(
+            "\n--- Real ESMF detected but Apple Silicon (arm64) — "
+            "using mock to avoid Mesh.add_elements crash ---"
+        )
+        setup_esmpy_mock()
+    else:
+        HAS_REAL_ESMF = True
+        print("\n--- Real ESMF detected in conftest.py ---")
 except (ImportError, Exception) as e:
     HAS_REAL_ESMF = False
     print(f"\n--- Real ESMF NOT detected in conftest.py: {e} ---")

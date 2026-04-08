@@ -122,6 +122,47 @@ regridder.plot_comparison(
 )
 ```
 
+## 5. Mesh Wireframe Visualization
+
+For unstructured grids (MPAS, UGRID, SCRIP), `plot_mesh` draws the cell edges on a map projection — useful for inspecting variable-resolution meshes before regridding.
+
+```python
+import xarray as xr
+from xregrid.viz import plot_mesh
+
+ds = xr.open_dataset("mpas_mesh.nc")
+
+# Default: Orthographic globe view
+plot_mesh(ds, title="MPAS Variable-Resolution Mesh")
+```
+
+You can customize the projection, edge styling, and even fill cells:
+
+```python
+import cartopy.crs as ccrs
+
+# Flat map with colored edges
+plot_mesh(
+    ds,
+    projection=ccrs.Robinson(),
+    edgecolor="steelblue",
+    linewidth=0.2,
+    title="MPAS Mesh (Robinson)",
+)
+
+# Filled cells for density visualization
+plot_mesh(
+    ds,
+    facecolor="lightskyblue",
+    edgecolor="navy",
+    alpha=0.4,
+)
+```
+
+`plot_mesh` supports any dataset that contains MPAS (`verticesOnCell`), UGRID (`face_node_connectivity`), or SCRIP (`lat_b`/`lon_b`) conventions.
+
+---
+
 ## Summary of Plotting Functions
 
 | Method | Description |
@@ -130,3 +171,4 @@ regridder.plot_comparison(
 | `Regridder.plot_diagnostics()`| Spatial quality (Weight Sum, Unmapped Mask) |
 | `Regridder.plot_weights()`    | Inspect weights for a specific point |
 | `xregrid.plot()`              | Generic 2D spatial plot for any DataArray |
+| `xregrid.plot_mesh()`         | Unstructured mesh wireframe (MPAS, UGRID, SCRIP) |

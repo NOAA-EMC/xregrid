@@ -160,6 +160,20 @@ from xregrid import load_esmf_file
 ds = load_esmf_file("path/to/mesh.nc")
 ```
 
+### load_vtk_mesh
+
+::: xregrid.load_vtk_mesh
+
+Load an ESMF VTK legacy unstructured grid file into a UGRID-style xarray Dataset.
+
+```python
+from xregrid import load_vtk_mesh
+
+# Load a VTK mesh and use it for regridding
+ds = load_vtk_mesh("esmf_mesh.vtk")
+regridder = Regridder(ds, target_grid, method="conservative")
+```
+
 ## High-Performance Computing
 
 ### get_rdhpcs_cluster
