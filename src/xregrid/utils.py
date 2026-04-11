@@ -1069,8 +1069,8 @@ def create_grid_like(
 
 
 def create_mesh_from_coords(
-    x: np.ndarray,
-    y: np.ndarray,
+    x: Union[np.ndarray, xr.DataArray],
+    y: Union[np.ndarray, xr.DataArray],
     crs: Union[str, int, Any],
     chunks: Optional[Union[int, Dict[str, int]]] = None,
 ) -> xr.Dataset:
@@ -1079,9 +1079,9 @@ def create_mesh_from_coords(
 
     Parameters
     ----------
-    x : np.ndarray
+    x : np.ndarray or xr.DataArray
         1D array of x coordinates in CRS units.
-    y : np.ndarray
+    y : np.ndarray or xr.DataArray
         1D array of y coordinates in CRS units.
     crs : str, int, or pyproj.CRS
         The CRS of the coordinates.
@@ -1092,7 +1092,7 @@ def create_mesh_from_coords(
     Returns
     -------
     xr.Dataset
-        The mesh dataset containing 'lat', 'lon' as 1D arrays sharing a dimension.
+        The mesh dataset containing 'lat', 'lon' and 'x', 'y' as 1D arrays.
     """
     if pyproj is None:
         raise ImportError(
@@ -1101,18 +1101,30 @@ def create_mesh_from_coords(
         )
     crs_obj = pyproj.CRS(crs)
 
-    x_da = xr.DataArray(x, dims=["n_pts"], name="x")
-    y_da = xr.DataArray(y, dims=["n_pts"], name="y")
+    # Force n_pts dimension to avoid alignment/broadcasting issues in apply_ufunc
+    # Preserve backend (data) while dropping stale coordinates
+    if isinstance(x, xr.DataArray):
+        x_da = xr.DataArray(x.data, dims=["n_pts"], name="x", attrs=x.attrs)
+    else:
+        x_da = xr.DataArray(x, dims=["n_pts"], name="x")
+
+    if isinstance(y, xr.DataArray):
+        y_da = xr.DataArray(y.data, dims=["n_pts"], name="y", attrs=y.attrs)
+    else:
+        y_da = xr.DataArray(y, dims=["n_pts"], name="y")
 
     if chunks is not None:
-        # Mesh coordinates share the 'n_pts' dimension.
-        # If chunks is a dict, we filter for relevant dimensions.
+        # If chunks is a dict, ensure we use the canonical dimension name
         if isinstance(chunks, dict):
-            x_da = x_da.chunk({k: v for k, v in chunks.items() if k in x_da.dims})
-            y_da = y_da.chunk({k: v for k, v in chunks.items() if k in y_da.dims})
-        else:
-            x_da = x_da.chunk(chunks)
-            y_da = y_da.chunk(chunks)
+            # Map any single-dimension chunking to n_pts
+            n_pts_chunks = next(iter(chunks.values()))
+            chunks = {"n_pts": n_pts_chunks}
+        x_da = x_da.chunk(chunks)
+        y_da = y_da.chunk(chunks)
+
+    # Backend detection for provenance
+    is_lazy = chunks is not None or hasattr(x_da.data, "dask")
+    backend = "Lazy" if is_lazy else "Eager"
 
     # Use apply_ufunc with dask='parallelized'
     lon, lat = xr.apply_ufunc(
@@ -1126,8 +1138,30 @@ def create_mesh_from_coords(
         output_core_dims=[[], []],
     )
 
+    # Conditional metadata based on CRS type
+    if crs_obj.is_geographic:
+        x_std, y_std = "longitude", "latitude"
+        x_units, y_units = "degrees_east", "degrees_north"
+    else:
+        x_std, y_std = "projection_x_coordinate", "projection_y_coordinate"
+        try:
+            x_units = y_units = crs_obj.axis_info[0].unit_name or "m"
+        except (IndexError, AttributeError):
+            x_units = y_units = "m"
+
     ds = xr.Dataset(
         coords={
+            "n_pts": (["n_pts"], np.arange(x_da.size)),
+            "x": (
+                ["n_pts"],
+                x_da.data,
+                {"units": x_units, "standard_name": x_std},
+            ),
+            "y": (
+                ["n_pts"],
+                y_da.data,
+                {"units": y_units, "standard_name": y_std},
+            ),
             "lat": (
                 ["n_pts"],
                 lat.data,
@@ -1140,10 +1174,32 @@ def create_mesh_from_coords(
             ),
         }
     )
+
+    # Add grid_mapping variable for CF-compliance
+    if crs_obj.is_projected:
+        gm_name = "spatial_ref"
+        ds[gm_name] = ([], 0, crs_obj.to_cf())
+        ds.attrs["grid_mapping"] = gm_name
+        for var in ["x", "y", "lat", "lon"]:
+            ds[var].attrs["grid_mapping"] = gm_name
+
     ds.attrs["crs"] = crs_obj.to_wkt()
 
+    # Capture extents for provenance (careful with lazy arrays)
+    if not is_lazy:
+        extent = (
+            float(x_da.min()),
+            float(x_da.max()),
+            float(y_da.min()),
+            float(y_da.max()),
+        )
+        extent_msg = f" Extent: {extent}."
+    else:
+        extent_msg = ""
+
     update_history(
-        ds, f"Created mesh from coordinates and CRS {crs} using xregrid (Lazy)."
+        ds,
+        f"Created mesh from coordinates and CRS {crs} using xregrid ({backend}).{extent_msg}",
     )
 
     return ds
