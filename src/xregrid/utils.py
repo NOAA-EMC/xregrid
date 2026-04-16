@@ -790,7 +790,8 @@ def create_sinusoidal_grid(
         For global MODIS, this is roughly (-20015109.354, 20015109.354, -10007554.677, 10007554.677).
     res : float or Tuple[float, float] or str
         Grid resolution in meters. If float, same resolution in x and y.
-        Supports aliases: '1km' (926.625m), '500m' (463.313m), '250m' (231.656m).
+        Supports aliases: '1km' (926.625m), '500m' (463.313m), '250m' (231.656m),
+        '5km' (4633.127m), '10km' (9266.254m).
     lon_0 : float, default 0.0
         The central meridian.
     radius : float, default 6371007.181
@@ -807,6 +808,8 @@ def create_sinusoidal_grid(
     """
     # Resolution aliases for standard MODIS sinusoidal grids
     res_map = {
+        "10km": 9266.254331,
+        "5km": 4633.1271655,
         "1km": 926.6254331,
         "500m": 463.3127166,
         "250m": 231.6563583,
