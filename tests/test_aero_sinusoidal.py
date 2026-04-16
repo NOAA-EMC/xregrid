@@ -83,5 +83,19 @@ def test_sinusoidal_grid_like():
     assert np.allclose(ds_base.x.max() + res / 2, ds_new.x.max() + new_res / 2)
 
 
+def test_sinusoidal_res_aliases():
+    """Verify Sinusoidal grid generation with resolution aliases."""
+    extent = (0, 10000, 0, 10000)
+    ds_1km = create_sinusoidal_grid(extent, "1km")
+    ds_500m = create_sinusoidal_grid(extent, "500m")
+    ds_250m = create_sinusoidal_grid(extent, "250m")
+
+    # 1km alias should be ~926.6m
+    expected_1km = 926.6254331
+    assert np.allclose(ds_1km.x.diff("x").mean(), expected_1km)
+    assert np.allclose(ds_500m.x.diff("x").mean(), expected_1km / 2)
+    assert np.allclose(ds_250m.x.diff("x").mean(), expected_1km / 4)
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

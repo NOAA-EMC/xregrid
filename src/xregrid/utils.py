@@ -772,7 +772,7 @@ def create_grid_from_ioapi(
 
 def create_sinusoidal_grid(
     extent: Tuple[float, float, float, float],
-    res: Union[float, Tuple[float, float]],
+    res: Union[float, Tuple[float, float], str],
     lon_0: float = 0.0,
     radius: float = 6371007.181,
     add_bounds: bool = True,
@@ -788,8 +788,9 @@ def create_sinusoidal_grid(
     extent : Tuple[float, float, float, float]
         Grid extent in projection units (meters): (min_x, max_x, min_y, max_y).
         For global MODIS, this is roughly (-20015109.354, 20015109.354, -10007554.677, 10007554.677).
-    res : float or Tuple[float, float]
+    res : float or Tuple[float, float] or str
         Grid resolution in meters. If float, same resolution in x and y.
+        Supports aliases: '1km' (926.625m), '500m' (463.313m), '250m' (231.656m).
     lon_0 : float, default 0.0
         The central meridian.
     radius : float, default 6371007.181
@@ -804,6 +805,16 @@ def create_sinusoidal_grid(
     xr.Dataset
         The grid dataset containing 'lat', 'lon' and projected coordinates 'x', 'y'.
     """
+    # Resolution aliases for standard MODIS sinusoidal grids
+    res_map = {
+        "1km": 926.6254331,
+        "500m": 463.3127166,
+        "250m": 231.6563583,
+    }
+
+    if isinstance(res, str) and res in res_map:
+        res = res_map[res]
+
     crs = f"+proj=sinu +lon_0={lon_0} +x_0=0 +y_0=0 +R={radius} +units=m +no_defs"
     ds = create_grid_from_crs(crs, extent, res, add_bounds=add_bounds, chunks=chunks)
     update_history(
