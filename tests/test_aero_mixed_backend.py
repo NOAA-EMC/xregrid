@@ -42,9 +42,9 @@ def test_mixed_backend_dataset_regrid():
             regridder = Regridder(ds_src, ds_tgt, method="bilinear", parallel=True)
 
             # Ensure weights are indeed remote
-            assert hasattr(
-                regridder._weights_matrix, "key"
-            ), "Weights should be Dask Futures"
+            assert hasattr(regridder._weights_matrix, "key"), (
+                "Weights should be Dask Futures"
+            )
 
             # 4. Regrid!
             # Before the fix, this would crash when processing "var_eager"
@@ -55,12 +55,12 @@ def test_mixed_backend_dataset_regrid():
             assert "var_lazy" in ds_out
 
             # Check backends are preserved
-            assert not hasattr(
-                ds_out.var_eager.data, "dask"
-            ), "var_eager should remain NumPy-backed"
-            assert hasattr(
-                ds_out.var_lazy.data, "dask"
-            ), "var_lazy should remain Dask-backed"
+            assert not hasattr(ds_out.var_eager.data, "dask"), (
+                "var_eager should remain NumPy-backed"
+            )
+            assert hasattr(ds_out.var_lazy.data, "dask"), (
+                "var_lazy should remain Dask-backed"
+            )
 
             # Check shape
             expected_shape_tgt = (ds_tgt.sizes["lat"], ds_tgt.sizes["lon"])

@@ -675,7 +675,8 @@ def create_grid_from_ioapi(
     - 7: Equatorial Mercator
     - 8: Transverse Mercator
     - 9: Albers Equal Area
-    - 10: Lambert Azimuthal Equal Area / Sinusoidal
+    - 10: Lambert Azimuthal Equal Area
+    - 13: Sinusoidal
 
     Parameters
     ----------
@@ -750,6 +751,8 @@ def create_grid_from_ioapi(
             f"+proj=laea +lat_0={ycent} +lon_0={xcent} "
             f"+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
         )
+    elif gdtyp == 13:  # Sinusoidal
+        crs = f"+proj=sinu +lon_0={xcent} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
     else:
         raise ValueError(f"Unsupported IOAPI GDTYP: {gdtyp}")
 
@@ -764,6 +767,48 @@ def create_grid_from_ioapi(
 
     update_history(ds, f"Created grid from IOAPI metadata (GDTYP={gdtyp})")
 
+    return ds
+
+
+def create_sinusoidal_grid(
+    extent: Tuple[float, float, float, float],
+    res: Union[float, Tuple[float, float]],
+    lon_0: float = 0.0,
+    radius: float = 6371007.181,
+    add_bounds: bool = True,
+    chunks: Optional[Union[int, Dict[str, int]]] = None,
+) -> xr.Dataset:
+    """
+    Create a structured grid dataset with a Sinusoidal projection.
+
+    Commonly used for satellite data like MODIS.
+
+    Parameters
+    ----------
+    extent : Tuple[float, float, float, float]
+        Grid extent in projection units (meters): (min_x, max_x, min_y, max_y).
+        For global MODIS, this is roughly (-20015109.354, 20015109.354, -10007554.677, 10007554.677).
+    res : float or Tuple[float, float]
+        Grid resolution in meters. If float, same resolution in x and y.
+    lon_0 : float, default 0.0
+        The central meridian.
+    radius : float, default 6371007.181
+        Radius of the sphere (default is MODIS sinusoidal sphere radius).
+    add_bounds : bool, default True
+        Whether to add cell boundary coordinates.
+    chunks : int or Dict[str, int], optional
+        Chunk sizes for the resulting dask-backed dataset.
+
+    Returns
+    -------
+    xr.Dataset
+        The grid dataset containing 'lat', 'lon' and projected coordinates 'x', 'y'.
+    """
+    crs = f"+proj=sinu +lon_0={lon_0} +x_0=0 +y_0=0 +R={radius} +units=m +no_defs"
+    ds = create_grid_from_crs(crs, extent, res, add_bounds=add_bounds, chunks=chunks)
+    update_history(
+        ds, f"Created Sinusoidal grid (lon_0={lon_0}, R={radius}) using xregrid."
+    )
     return ds
 
 
