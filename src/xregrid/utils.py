@@ -402,6 +402,8 @@ def _find_coord(
             "LAT",
             "Latitude",
             "grid_center_lat",
+            "grid_latt",
+            "grid_lat",
         ],
         "longitude": [
             "lon",
@@ -414,6 +416,8 @@ def _find_coord(
             "LON",
             "Longitude",
             "grid_center_lon",
+            "grid_lont",
+            "grid_lon",
         ],
     }
 
@@ -651,7 +655,11 @@ def create_grid_from_crs(
         ds["x"].attrs["bounds"] = "x_b"
         ds["y"].attrs["bounds"] = "y_b"
 
-    update_history(ds, f"Created grid from CRS {crs} using xregrid.")
+    # Backend detection for provenance
+    is_lazy = chunks is not None
+    backend = "Lazy" if is_lazy else "Eager"
+
+    update_history(ds, f"Created grid from CRS {crs} using xregrid ({backend}).")
     if chunks is not None:
         ds = ds.chunk(chunks)
     return ds
@@ -823,6 +831,128 @@ def create_sinusoidal_grid(
     update_history(
         ds, f"Created Sinusoidal grid (lon_0={lon_0}, R={radius}) using xregrid."
     )
+    return ds
+
+
+def create_rotated_latlon_grid(
+    extent: Tuple[float, float, float, float],
+    res: Union[float, Tuple[float, float]],
+    grid_north_pole_lat: float,
+    grid_north_pole_lon: float,
+    north_pole_grid_lon: float = 0.0,
+    add_bounds: bool = True,
+    chunks: Optional[Union[int, Dict[str, int]]] = None,
+) -> xr.Dataset:
+    """
+    Create a structured grid dataset with a Rotated Pole (Rotated Lat-Lon) projection.
+
+    Commonly used in regional climate models (e.g., CORDEX, regional NAM).
+
+    Parameters
+    ----------
+    extent : Tuple[float, float, float, float]
+        Grid extent in rotated degrees: (min_x, max_x, min_y, max_y).
+    res : float or Tuple[float, float]
+        Grid resolution in degrees. If float, same resolution in x and y.
+    grid_north_pole_lat : float
+        Latitude of the north pole of the rotated grid.
+    grid_north_pole_lon : float
+        Longitude of the north pole of the rotated grid.
+    north_pole_grid_lon : float, default 0.0
+        The longitude of the true north pole in the rotated grid.
+    add_bounds : bool, default True
+        Whether to add cell boundary coordinates.
+    chunks : int or Dict[str, int], optional
+        Chunk sizes for the resulting dask-backed dataset.
+
+    Returns
+    -------
+    xr.Dataset
+        The grid dataset containing 'lat', 'lon' and rotated coordinates 'rlon', 'rlat'.
+    """
+    if pyproj is None:
+        raise ImportError("pyproj is required for create_rotated_latlon_grid.")
+
+    # Define CF-compliant grid mapping
+    cf_grid_mapping = {
+        "grid_mapping_name": "rotated_latitude_longitude",
+        "grid_north_pole_latitude": grid_north_pole_lat,
+        "grid_north_pole_longitude": grid_north_pole_lon,
+        "north_pole_grid_longitude": north_pole_grid_lon,
+    }
+
+    # Create CRS from CF parameters
+    crs_obj = pyproj.CRS.from_cf(cf_grid_mapping)
+
+    # Translate chunks to core dimension names (y, x) for create_grid_from_crs
+    core_chunks = chunks
+    if isinstance(chunks, dict):
+        core_chunks = chunks.copy()
+        if "rlon" in chunks:
+            core_chunks["x"] = core_chunks.pop("rlon")
+        if "rlat" in chunks:
+            core_chunks["y"] = core_chunks.pop("rlat")
+
+    # Use core implementation
+    ds = create_grid_from_crs(
+        crs_obj, extent, res, add_bounds=add_bounds, chunks=core_chunks
+    )
+
+    # Rename coordinates to standard rotated pole names (rlat, rlon)
+    ds = ds.rename({"y": "rlat", "x": "rlon"})
+    if add_bounds:
+        ds = ds.rename({"y_b": "rlat_b", "x_b": "rlon_b"})
+
+    # Update metadata to follow CF conventions for rotated pole
+    ds["rlat"].attrs.update(
+        {
+            "units": "degrees",
+            "standard_name": "grid_latitude",
+            "long_name": "rotated latitude",
+        }
+    )
+    ds["rlon"].attrs.update(
+        {
+            "units": "degrees",
+            "standard_name": "grid_longitude",
+            "long_name": "rotated longitude",
+        }
+    )
+
+    if add_bounds:
+        ds["rlat"].attrs["bounds"] = "rlat_b"
+        ds["rlon"].attrs["bounds"] = "rlon_b"
+        ds["rlat_b"].attrs.update(
+            {
+                "units": "degrees",
+                "standard_name": "grid_latitude",
+                "long_name": "rotated latitude bounds",
+            }
+        )
+        ds["rlon_b"].attrs.update(
+            {
+                "units": "degrees",
+                "standard_name": "grid_longitude",
+                "long_name": "rotated longitude bounds",
+            }
+        )
+
+    # Ensure the grid mapping variable is properly named and referenced
+    gm_name = "rotated_pole"
+    ds[gm_name] = ([], 0, crs_obj.to_cf())
+    ds.attrs["grid_mapping"] = gm_name
+
+    for var in ds.data_vars:
+        ds[var].attrs["grid_mapping"] = gm_name
+    for coord in ["rlat", "rlon", "lat", "lon"]:
+        if coord in ds.coords:
+            ds[coord].attrs["grid_mapping"] = gm_name
+
+    update_history(
+        ds,
+        f"Created Rotated Lat-Lon grid (pole: {grid_north_pole_lat}N, {grid_north_pole_lon}E) using xregrid.",
+    )
+
     return ds
 
 
