@@ -402,6 +402,8 @@ def _find_coord(
             "LAT",
             "Latitude",
             "grid_center_lat",
+            "grid_latt",
+            "grid_lat",
         ],
         "longitude": [
             "lon",
@@ -414,6 +416,8 @@ def _find_coord(
             "LON",
             "Longitude",
             "grid_center_lon",
+            "grid_lont",
+            "grid_lon",
         ],
     }
 
