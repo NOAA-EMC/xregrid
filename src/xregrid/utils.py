@@ -778,6 +778,62 @@ def create_grid_from_ioapi(
     return ds
 
 
+def create_lcc_grid(
+    extent: Tuple[float, float, float, float],
+    res: Union[float, Tuple[float, float]],
+    lat_1: float,
+    lat_2: float,
+    lat_0: float,
+    lon_0: float,
+    add_bounds: bool = True,
+    chunks: Optional[Union[int, Dict[str, int]]] = None,
+) -> xr.Dataset:
+    """
+    Create a structured grid dataset with a Lambert Conformal Conic (LCC) projection.
+
+    Commonly used for regional meteorological models (e.g., HRRR, NAM, CORDEX).
+
+    Parameters
+    ----------
+    extent : Tuple[float, float, float, float]
+        Grid extent in projection units (meters): (min_x, max_x, min_y, max_y).
+    res : float or Tuple[float, float]
+        Grid resolution in meters. If float, same resolution in x and y.
+    lat_1 : float
+        First standard parallel.
+    lat_2 : float
+        Second standard parallel.
+    lat_0 : float
+        Latitude of projection origin.
+    lon_0 : float
+        Longitude of projection origin (central meridian).
+    add_bounds : bool, default True
+        Whether to add cell boundary coordinates.
+    chunks : int or Dict[str, int], optional
+        Chunk sizes for the resulting dask-backed dataset.
+
+    Returns
+    -------
+    xr.Dataset
+        The grid dataset containing 'lat', 'lon' and projected coordinates 'x', 'y'.
+    """
+    crs = (
+        f"+proj=lcc +lat_1={lat_1} +lat_2={lat_2} +lat_0={lat_0} "
+        f"+lon_0={lon_0} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
+    )
+    ds = create_grid_from_crs(crs, extent, res, add_bounds=add_bounds, chunks=chunks)
+
+    # Backend detection for provenance
+    is_lazy = chunks is not None
+    backend = "Lazy" if is_lazy else "Eager"
+
+    update_history(
+        ds,
+        f"Created Lambert Conformal Conic grid (lat_1={lat_1}, lat_2={lat_2}, lat_0={lat_0}, lon_0={lon_0}) using xregrid ({backend}).",
+    )
+    return ds
+
+
 def create_sinusoidal_grid(
     extent: Tuple[float, float, float, float],
     res: Union[float, Tuple[float, float], str],
