@@ -1,8 +1,8 @@
 from __future__ import annotations
-import pytest
 import numpy as np
 import xarray as xr
 from xregrid.utils import create_global_grid, create_mesh_from_coords, spatial_slice
+
 
 def test_spatial_slice_rectilinear() -> None:
     """
@@ -25,13 +25,16 @@ def test_spatial_slice_rectilinear() -> None:
     assert "Spatially sliced" in ds_sliced.attrs["history"]
 
     # 2. Lazy (Dask)
-    ds_lazy = create_global_grid(res_lat=1.0, res_lon=1.0, chunks={"lat": 10, "lon": 10})
+    ds_lazy = create_global_grid(
+        res_lat=1.0, res_lon=1.0, chunks={"lat": 10, "lon": 10}
+    )
     ds_sliced_lazy = spatial_slice(ds_lazy, extent)
 
     # In xarray, dimension coordinates are often eager (NumPy) due to indexing.
     # Check lat_b instead, which should remain lazy.
     assert hasattr(ds_sliced_lazy.lat_b.data, "dask")
     xr.testing.assert_allclose(ds_sliced, ds_sliced_lazy.compute())
+
 
 def test_spatial_slice_unstructured() -> None:
     """
@@ -66,6 +69,7 @@ def test_spatial_slice_unstructured() -> None:
     ds_res = ds_sliced_lazy.compute().dropna("n_pts")
     assert ds_res.sizes["n_pts"] == 1
     assert ds_res.lon.values[0] == 15.0
+
 
 def test_spatial_slice_wrapping() -> None:
     """
