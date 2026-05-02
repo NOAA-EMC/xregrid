@@ -6,6 +6,7 @@ scipy
 dask
 cubed
 cubed-xarray
+zarr<3
 netCDF4
 cf-xarray
 pyproj
