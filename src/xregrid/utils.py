@@ -1635,53 +1635,103 @@ def spatial_slice(
     min_y -= buffer
     max_y += buffer
 
-    # 3. Y-Slicing (Latitude or Projection Y)
-    y_dim = y_da.dims[0]
-    if obj.indexes[y_dim].is_monotonic_increasing:
-        obj = obj.sel({y_dim: slice(min_y, max_y)})
+    # 3. Slicing Logic
+    # Determine if we can use .sel() (Rectilinear) or must use .where() (Curvilinear/Unstructured)
+    is_rectilinear = (
+        y_da.ndim == 1
+        and x_da.ndim == 1
+        and y_da.name == y_da.dims[0]
+        and x_da.name == x_da.dims[0]
+        and y_da.dims[0] != x_da.dims[0]
+        and y_da.dims[0] in obj.indexes
+        and x_da.dims[0] in obj.indexes
+    )
+
+    if is_rectilinear:
+        # Fast path for rectilinear grids using indexes (Always Lazy)
+        y_dim, x_dim = y_da.dims[0], x_da.dims[0]
+
+        # Y-Slicing
+        if obj.indexes[y_dim].is_monotonic_increasing:
+            obj = obj.sel({y_dim: slice(min_y, max_y)})
+        else:
+            obj = obj.sel({y_dim: slice(max_y, min_y)})
+
+        # X-Slicing with Longitude Wrapping
+        if not is_geographic:
+            if obj.indexes[x_dim].is_monotonic_increasing:
+                obj = obj.sel({x_dim: slice(min_x, max_x)})
+            else:
+                obj = obj.sel({x_dim: slice(max_x, min_x)})
+            res = obj
+            wrapped = False
+        else:
+            lon_grid = obj.indexes[x_dim]
+            g_min = lon_grid.min()
+            norm_min_x = (min_x - g_min) % 360 + g_min
+            norm_max_x = (max_x - g_min) % 360 + g_min
+
+            if norm_min_x > norm_max_x:
+                wrapped = True
+                if lon_grid.is_monotonic_increasing:
+                    p1 = obj.sel({x_dim: slice(norm_min_x, g_min + 360)})
+                    p2 = obj.sel({x_dim: slice(g_min, norm_max_x)})
+                else:
+                    p1 = obj.sel({x_dim: slice(g_min + 360, norm_min_x)})
+                    p2 = obj.sel({x_dim: slice(norm_max_x, g_min)})
+                res = xr.concat([p1, p2], dim=x_dim)
+            else:
+                wrapped = False
+                if lon_grid.is_monotonic_increasing:
+                    res = obj.sel({x_dim: slice(norm_min_x, norm_max_x)})
+                else:
+                    res = obj.sel({x_dim: slice(norm_max_x, norm_min_x)})
     else:
-        obj = obj.sel({y_dim: slice(max_y, min_y)})
+        # Robust path for Curvilinear and Unstructured using masking
+        mask_y = (y_da >= min_y) & (y_da <= max_y)
 
-    # 4. X-Slicing (Longitude or Projection X)
-    x_dim = x_da.dims[0]
-    if not is_geographic:
-        # Standard slice for projected coordinates
-        if obj.indexes[x_dim].is_monotonic_increasing:
-            obj = obj.sel({x_dim: slice(min_x, max_x)})
+        if not is_geographic:
+            mask_x = (x_da >= min_x) & (x_da <= max_x)
+            wrapped = False
         else:
-            obj = obj.sel({x_dim: slice(max_x, min_x)})
-        return obj
+            # Strictly Lazy Longitude Wrapping logic
+            # Works for any longitude convention (0-360 or -180 to 180)
+            range_x = (max_x - min_x) % 360
+            if range_x == 0 and max_x != min_x:
+                range_x = 360
 
-    # 5. Longitude Wrapping Logic
-    # Get grid convention from eager indexes
-    lon_grid = obj.indexes[x_dim]
-    g_min = lon_grid.min()
+            if (max_x - min_x) >= 360:
+                mask_x = xr.DataArray(True)
+                wrapped = False
+            else:
+                mask_x = ((x_da - min_x) % 360) <= range_x
+                wrapped = (max_x - min_x) > range_x or min_x < 0 or max_x > 360
 
-    # Normalize extent to [g_min, g_min + 360]
-    norm_min_x = (min_x - g_min) % 360 + g_min
-    norm_max_x = (max_x - g_min) % 360 + g_min
+        mask = mask_y & mask_x
 
-    # Detect if we need a wrapped slice
-    if norm_min_x > norm_max_x:
-        # Crosses the grid boundary
-        if lon_grid.is_monotonic_increasing:
-            part1 = obj.sel({x_dim: slice(norm_min_x, g_min + 360)})
-            part2 = obj.sel({x_dim: slice(g_min, norm_max_x)})
-        else:
-            part1 = obj.sel({x_dim: slice(g_min + 360, norm_min_x)})
-            part2 = obj.sel({x_dim: slice(norm_max_x, g_min)})
+        # Aero Protocol: No Hidden Computes.
+        # Decide if we can use drop=True. We avoid it for lazy data because
+        # it forces a compute to determine the output shape.
+        is_lazy = False
+        try:
+            from dask.base import is_dask_collection
 
-        # Concatenate parts
-        res = xr.concat([part1, part2], dim=x_dim)
-    else:
-        # Simple non-wrapped slice
-        if lon_grid.is_monotonic_increasing:
-            res = obj.sel({x_dim: slice(norm_min_x, norm_max_x)})
-        else:
-            res = obj.sel({x_dim: slice(norm_max_x, norm_min_x)})
+            if is_dask_collection(obj) or is_dask_collection(mask):
+                is_lazy = True
+        except ImportError:
+            # Fallback for Dataset/DataArray robustness without dask installed
+            if hasattr(obj, "data_vars"):  # Dataset
+                is_lazy = any(hasattr(v.data, "dask") for v in obj.data_vars.values())
+            elif hasattr(obj, "data"):  # DataArray
+                is_lazy = hasattr(obj.data, "dask")
+
+            if not is_lazy and hasattr(mask, "data"):
+                is_lazy = hasattr(mask.data, "dask")
+
+        res = obj.where(mask, drop=not is_lazy)
 
     # Metadata update
-    msg = f"Spatially sliced to extent {extent} (wrapped={norm_min_x > norm_max_x})"
+    msg = f"Spatially sliced to extent {extent} (wrapped={wrapped})"
     update_history(res, msg)
 
     return res
