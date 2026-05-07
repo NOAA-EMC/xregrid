@@ -1,10 +1,10 @@
 [project]
 site_name = "XRegrid Documentation"
-site_url = "https://bbakernoaa.github.io/xregrid"
+site_url = "https://noaa-emc.github.io/xregrid"
 site_author = "XRegrid Contributors"
 site_description = "An optimized ESMF-based regridder for xarray"
 repo_name = "bbakernoaa/xregrid"
-repo_url = "https://github.com/bbakernoaa/xregrid"
+repo_url = "https://github.com/noaa-emc/xregrid"
 
 nav = [
     { "Home" = "index.md" },
