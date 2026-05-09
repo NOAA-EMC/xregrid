@@ -1,6 +1,6 @@
 # XRegrid
 
-An optimized ESMF-based regridder for xarray that provides significant performance improvements over xESMF.
+An optimized ESMF-based regridder for xarray that provides significant performance improvements.
 
 ## Overview
 
