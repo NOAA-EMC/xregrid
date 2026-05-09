@@ -1364,8 +1364,12 @@ def create_mesh_from_coords(
             # Map any single-dimension chunking to n_pts
             n_pts_chunks = next(iter(chunks.values()))
             chunks = {"n_pts": n_pts_chunks}
+        else:
+            n_pts_chunks = chunks
         x_da = x_da.chunk(chunks)
         y_da = y_da.chunk(chunks)
+    else:
+        n_pts_chunks = None
 
     # Backend detection for provenance
     is_lazy = chunks is not None or hasattr(x_da.data, "dask")
@@ -1396,7 +1400,10 @@ def create_mesh_from_coords(
 
     ds = xr.Dataset(
         coords={
-            "n_pts": (["n_pts"], np.arange(x_da.size)),
+            "n_pts": (
+                ["n_pts"],
+                _lazy_arange(0, x_da.size, 1, chunks=n_pts_chunks),
+            ),
             "x": (
                 ["n_pts"],
                 x_da.data,
