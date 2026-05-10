@@ -9,7 +9,15 @@ from xregrid import Regridder, create_global_grid, create_regional_grid
 from xregrid.utils import get_rdhpcs_cluster
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
+    """
+    Parse command-line arguments for the xregrid CLI.
+
+    Returns
+    -------
+    argparse.Namespace
+        The parsed command-line arguments.
+    """
     parser = argparse.ArgumentParser(description="xregrid CLI: Regrid NetCDF files.")
     parser.add_argument("src", help="Path to the source NetCDF file.")
     parser.add_argument(
@@ -69,7 +77,13 @@ def parse_args():
     return parser.parse_args()
 
 
-def main():
+def main() -> None:
+    """
+    Main entry point for the xregrid CLI.
+
+    Performs regridding of a source NetCDF file to a target grid and saves the result.
+    Supports local and distributed Dask clusters for parallel processing.
+    """
     args = parse_args()
 
     # 1. Setup Dask Client if requested

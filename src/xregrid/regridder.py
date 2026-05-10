@@ -1037,6 +1037,7 @@ class Regridder:
             if client is not None:
 
                 def _clear_worker_cache():
+                    """Internal helper to clear the worker-local cache."""
                     from xregrid.core import _WORKER_CACHE
 
                     _WORKER_CACHE.clear()
