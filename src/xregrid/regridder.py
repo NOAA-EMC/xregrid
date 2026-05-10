@@ -580,7 +580,22 @@ class Regridder:
             regrid_kwargs["norm_type"] = esmpy.NormType.FRACAREA
 
         # Build Regrid object
-        regrid = esmpy.Regrid(src_field, dst_field, **regrid_kwargs)
+        try:
+            regrid = esmpy.Regrid(src_field, dst_field, **regrid_kwargs)
+        except Exception as e:
+            msg = str(e)
+            if "ESMC_RC_ARG_OUTOFRANGE" in msg:
+                raise ValueError(
+                    "ESMF Argument out of range. This often happens if latitudes "
+                    "are not in [-90, 90] or if periodic grids have an extent of exactly 360 degrees."
+                ) from e
+            elif "ESMC_RC_GRID_PARTITION" in msg:
+                raise RuntimeError(
+                    "ESMF Grid partition error. Check for extremely small or degenerate grid cells."
+                ) from e
+            raise RuntimeError(
+                f"ESMPy failed to initialize Regrid object: {msg}"
+            ) from e
 
         # Explicit check for overlaps
         fl, fil = regrid.get_factors()
@@ -998,10 +1013,67 @@ class Regridder:
 
         if hasattr(self._weights_matrix, "key"):
             self._weights_matrix = self._dask_client.gather(self._weights_matrix)
-            if hasattr(self._total_weights, "key"):
+            if self._total_weights is not None and hasattr(self._total_weights, "key"):
                 self._total_weights = self._dask_client.gather(self._total_weights)
 
         return self._weights_matrix
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        """
+        Clear the global driver and worker caches for all Regridder instances.
+
+        This can be used to manually free memory when multiple Regridder
+        instances have been created in a long-running session.
+        """
+        global _DRIVER_CACHE
+        _DRIVER_CACHE.clear()
+
+        # Clear worker-local cache on all connected workers
+        try:
+            import dask.distributed
+
+            client = dask.distributed.get_client()
+            if client is not None:
+
+                def _clear_worker_cache():
+                    """Internal helper to clear the worker-local cache."""
+                    from xregrid.core import _WORKER_CACHE
+
+                    _WORKER_CACHE.clear()
+
+                client.run(_clear_worker_cache)
+        except (ImportError, ValueError):
+            pass
+
+    def clear_instance_cache(self) -> None:
+        """
+        Clear the worker-local cache entries specific to this Regridder instance.
+        """
+        if not self.parallel:
+            return
+
+        try:
+            import dask.distributed
+
+            client = self._dask_client or dask.distributed.get_client()
+            if client is not None:
+                from xregrid.core import _remove_from_worker_cache
+
+                # Remove by UID pattern
+                client.run(_remove_from_worker_cache, self._uid)
+
+                # Also clear driver cache for this instance
+                client_id = getattr(client, "id", id(client))
+                keys_to_remove = [
+                    k
+                    for k in _DRIVER_CACHE.keys()
+                    if k[0] == client_id and self._uid in k[1]
+                ]
+                for k in keys_to_remove:
+                    del _DRIVER_CACHE[k]
+        except (ImportError, ValueError):
+            pass
 
     def diagnostics(self) -> xr.Dataset:
         """
@@ -1267,6 +1339,16 @@ class Regridder:
             },
         )
         return ds
+
+    def __del__(self) -> None:
+        """
+        Cleanup instance-specific cache on deletion.
+        """
+        try:
+            if hasattr(self, "parallel") and self.parallel:
+                self.clear_instance_cache()
+        except Exception:
+            pass
 
     def __repr__(self) -> str:
         """

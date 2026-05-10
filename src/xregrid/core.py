@@ -28,6 +28,26 @@ def _setup_worker_cache(key: str, value: Any) -> None:
     _WORKER_CACHE[key] = value
 
 
+def _remove_from_worker_cache(key_pattern: str) -> int:
+    """
+    Remove all keys matching a pattern from the worker-local cache.
+
+    Parameters
+    ----------
+    key_pattern : str
+        The pattern (substring) to match in keys.
+
+    Returns
+    -------
+    int
+        Number of keys removed.
+    """
+    keys_to_remove = [k for k in _WORKER_CACHE.keys() if key_pattern in k]
+    for k in keys_to_remove:
+        del _WORKER_CACHE[k]
+    return len(keys_to_remove)
+
+
 def _matmul(matrix: Any, data: np.ndarray) -> np.ndarray:
     """
     Backend-agnostic matrix multiplication (matrix @ data.T).T.
@@ -121,6 +141,11 @@ def _apply_weights_core(
         flat_data = data_block
     else:
         flat_data = data_block.reshape(n_other, n_spatial)
+
+    # Robustness: Handle empty or all-NaN input arrays
+    if n_spatial == 0 or n_other == 0:
+        new_shape = other_dims_shape + shape_target
+        return np.full(new_shape, np.nan, dtype=data_block.dtype)
 
     if skipna:
         # Use a more memory-efficient NaN detection
