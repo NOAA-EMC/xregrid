@@ -877,7 +877,13 @@ def _create_esmf_grid(
                     mask_arg = None
                     if mask_var and mask_var in ds:
                         if method == "conservative":
-                            mask_val = ds[mask_var].values
+                            v_mask = ds[mask_var]
+                            mask_isel = {
+                                d: 0 for d in non_spatial_dims if d in v_mask.dims
+                            }
+                            if mask_isel:
+                                v_mask = v_mask.isel(mask_isel, drop=True)
+                            mask_val = v_mask.values
                             element_mask = mask_val[orig_idx].astype(np.int32)
                             mask_arg = element_mask
 

@@ -264,7 +264,17 @@ def _compute_chunk_weights(
             regrid_kwargs["norm_type"] = esmpy.NormType.FRACAREA
 
         # 4. Generate weights
-        regrid = esmpy.Regrid(src_field, dst_field, **regrid_kwargs)
+        try:
+            regrid = esmpy.Regrid(src_field, dst_field, **regrid_kwargs)
+        except Exception as e:
+            # For workers, we return the error string in the result tuple
+            return (
+                np.array([]),
+                np.array([]),
+                np.array([]),
+                f"Regrid initialization error: {str(e)}",
+            )
+
         weights = regrid.get_weights_dict(deep_copy=True)
 
         # 5. Dask Resource Hygiene: Destroy temporary ESMF objects
