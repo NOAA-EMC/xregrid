@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 # Consolidated tests: utils
 from xregrid import *
 from xregrid.utils import *
 from xregrid.viz import *
 from xregrid.regridder import *
-from __future__ import annotations
+from xregrid.grid import _get_mesh_info
 from unittest.mock import MagicMock, patch
 import dask.array as da
 import numpy as np
@@ -13,7 +15,8 @@ import xarray as xr
 
 try:
     import esmpy
-    if hasattr(esmpy, '_is_mock') or 'unittest.mock' in str(type(esmpy)):
+
+    if hasattr(esmpy, "_is_mock") or "unittest.mock" in str(type(esmpy)):
         raise ImportError
     HAS_REAL_ESMF = True
 except Exception:
@@ -21,7 +24,8 @@ except Exception:
 
 try:
     import esmpy
-    if hasattr(esmpy, '_is_mock') or 'unittest.mock' in str(type(esmpy)):
+
+    if hasattr(esmpy, "_is_mock") or "unittest.mock" in str(type(esmpy)):
         raise ImportError
     HAS_REAL_ESMF = True
 except:
@@ -44,6 +48,7 @@ try:
     HAS_REAL_ESMF = True
 except (ImportError, Exception):
     HAS_REAL_ESMF = False
+
 
 def test_auto_bounds_conservative_numpy_dask():
     """Verify auto-bounds generation for conservative regridding on both NumPy and Dask."""
@@ -74,6 +79,7 @@ def test_auto_bounds_conservative_numpy_dask():
     xr.testing.assert_allclose(res_eager, res_lazy.compute())
     assert "Automatically generated" in res_eager.attrs["history"]
 
+
 def test_plot_comparison_smoke():
     """Smoke test for plot_comparison utility."""
     ds = create_global_grid(30, 30)
@@ -87,6 +93,7 @@ def test_plot_comparison_smoke():
     fig = plot_comparison(da, da)
     assert fig is not None
     plt.close(fig)
+
 
 def test_cf_aware_dimension_mapping():
     """Verify that Regridder handles non-standard dimension names via CF-awareness."""
@@ -139,6 +146,7 @@ def test_cf_aware_dimension_mapping():
     np.testing.assert_allclose(res_eager.lat, tgt_grid.lat)
     np.testing.assert_allclose(res_eager.lon, tgt_grid.lon)
 
+
 def test_dataset_cf_awareness():
     """Verify CF-aware regridding for multiple variables in a Dataset."""
     src_grid = create_global_grid(20, 20)
@@ -175,6 +183,7 @@ def test_dataset_cf_awareness():
     assert "scalar" in ds_regridded.data_vars
     assert ds_regridded.scalar == 42.0
     assert "fixed_coord" in ds_regridded.coords
+
 
 def test_crs_propagation_dataarray():
     """
@@ -231,6 +240,7 @@ def test_crs_propagation_dataarray():
         assert crs_detected is not None
         assert crs_detected.to_epsg() == 32633
 
+
 def test_crs_propagation_dataset():
     """
     Test that CRS metadata is propagated when regridding a Dataset.
@@ -255,6 +265,7 @@ def test_crs_propagation_dataset():
 
     # History update
     assert "Regridded" in ds_out.attrs["history"]
+
 
 def test_create_grid_from_ioapi_lcc():
     """Verify IOAPI grid generation for LCC projection (Eager and Lazy)."""
@@ -299,6 +310,7 @@ def test_create_grid_from_ioapi_lcc():
     ds_lazy_comp = ds_lazy.compute()
     xr.testing.assert_allclose(ds_eager, ds_lazy_comp)
 
+
 def test_create_grid_from_ioapi_all_gdtyp():
     """Verify that all supported IOAPI GDTYP values can generate a grid."""
     base_metadata = {
@@ -329,6 +341,7 @@ def test_create_grid_from_ioapi_all_gdtyp():
         assert "lon" in ds.coords
         assert ds.attrs["ioapi_GDTYP"] == gdtyp
 
+
 def test_create_grid_from_ioapi_latlon():
     """Verify IOAPI grid generation for Lat-Lon."""
     metadata = {
@@ -352,10 +365,12 @@ def test_create_grid_from_ioapi_latlon():
     # but create_grid_from_crs might return lat/lon that are slightly different due to transform
     assert ds.lat.min() >= 40.0
 
+
 try:
     import dask.array as da
 except ImportError:
     da = None
+
 
 def test_create_mesh_from_coords_aero():
     """
@@ -408,6 +423,7 @@ def test_create_mesh_from_coords_aero():
     assert ds_eager.x.attrs["standard_name"] == "projection_x_coordinate"
     assert ds_eager.x.attrs["grid_mapping"] == "spatial_ref"
 
+
 def test_create_mesh_from_coords_regression_fix():
     """
     Verify the fix for the dimension mismatch regression and conditional metadata.
@@ -431,6 +447,7 @@ def test_create_mesh_from_coords_regression_fix():
     assert ds_geo.x.attrs["units"] == "degrees_east"
     assert ds_geo.y.attrs["standard_name"] == "latitude"
     assert ds_geo.y.attrs["units"] == "degrees_north"
+
 
 def test_spatial_slice_rectilinear() -> None:
     """
@@ -462,6 +479,7 @@ def test_spatial_slice_rectilinear() -> None:
     # Check lat_b instead, which should remain lazy.
     assert hasattr(ds_sliced_lazy.lat_b.data, "dask")
     xr.testing.assert_allclose(ds_sliced, ds_sliced_lazy.compute())
+
 
 def test_spatial_slice_unstructured() -> None:
     """
@@ -497,6 +515,7 @@ def test_spatial_slice_unstructured() -> None:
     assert ds_res.sizes["n_pts"] == 1
     assert ds_res.lon.values[0] == 15.0
 
+
 def test_spatial_slice_wrapping() -> None:
     """
     Test spatial_slice with longitude wrapping across different grid types.
@@ -529,6 +548,7 @@ def test_spatial_slice_wrapping() -> None:
     assert ds_un_sliced.sizes["n_pts"] == 2
     assert set(ds_un_sliced.lon.values) == {5.0, 355.0}
 
+
 def test_create_global_grid_lazy():
     """
     Aero Protocol: Double-Check Test for create_global_grid.
@@ -552,6 +572,7 @@ def test_create_global_grid_lazy():
     # Verify internal backend (lat_b is non-index so it should be chunked)
     assert hasattr(ds_lazy.lat_b.data, "dask")
 
+
 def test_create_regional_grid_lazy():
     """
     Aero Protocol: Double-Check Test for create_regional_grid.
@@ -572,6 +593,7 @@ def test_create_regional_grid_lazy():
 
     # Verify internal backend
     assert hasattr(ds_lazy.lat_b.data, "dask")
+
 
 def test_create_grid_from_crs_lazy():
     """
@@ -594,6 +616,7 @@ def test_create_grid_from_crs_lazy():
     # Verify internal backend (lat/lon are non-index here)
     assert hasattr(ds_lazy.lat.data, "dask")
 
+
 def test_create_mesh_from_coords_lazy():
     """
     Aero Protocol: Double-Check Test for create_mesh_from_coords.
@@ -613,6 +636,7 @@ def test_create_mesh_from_coords_lazy():
 
     # Verify internal backend
     assert hasattr(ds_lazy.lat.data, "dask")
+
 
 def test_create_grid_like_latlon():
     """
@@ -646,6 +670,7 @@ def test_create_grid_like_latlon():
     # Verify laziness: lat_b should be a dask array
     assert hasattr(ds_lazy.lat_b.data, "dask")
 
+
 def test_create_grid_like_projected():
     """
     Aero Protocol: Double-Check Test for create_grid_like (Projected).
@@ -673,6 +698,7 @@ def test_create_grid_like_projected():
     assert hasattr(ds_lazy.lat.data, "dask")
     assert ds_lazy.attrs["crs"] == ds_src.attrs["crs"]
 
+
 def test_rectilinear_hygiene():
     """
     Verify that _create_rectilinear_grid produces high-hygiene metadata.
@@ -693,6 +719,7 @@ def test_rectilinear_hygiene():
     assert ds.lat_b.attrs["standard_name"] == "latitude_bounds"
     assert ds.lon_b.attrs["standard_name"] == "longitude_bounds"
     assert "history" in ds.attrs
+
 
 def test_cf_coords_detection():
     # Create dataset with non-standard coordinate names but with CF attributes
@@ -748,6 +775,7 @@ def test_cf_coords_detection():
     # Verify results are identical (within float precision)
     np.testing.assert_allclose(out_eager.values, out_lazy.compute().values)
 
+
 def test_cf_bounds_detection():
     # Create dataset with non-standard bound names but with CF attributes
     ds_src = xr.Dataset(
@@ -793,6 +821,7 @@ def test_cf_bounds_detection():
     # If it reached here without error, it found the bounds and ESMPy initialized
     out = regridder(ds_src["data"])
     assert out.shape == (15, 25)
+
 
 def test_regridder_time_dimension_detection():
     # Setup source and target grids with time
@@ -867,6 +896,7 @@ def test_regridder_time_dimension_detection():
     assert res_ds["temp"].shape == (1, 5, 5, 10)
     assert res_ds["time_var"].dims == ("time",)
 
+
 def test_regridder_dtype_time_fallback():
     # Setup with time-like dtype but non-standard name
     lats = np.linspace(-90, 90, 10)
@@ -918,6 +948,7 @@ def test_regridder_dtype_time_fallback():
     assert "mytime" in res.dims
     assert res.shape == (1, 5, 10)
 
+
 def test_non_regriddable_object():
     # Test passing something that shouldn't be regridded
     lats = np.linspace(-90, 90, 10)
@@ -960,6 +991,7 @@ def test_non_regriddable_object():
     # Should return unchanged
     res = regridder(time_da)
     xr.testing.assert_identical(res, time_da)
+
 
 def test_regridder_vertical_dimension_detection():
     # Setup source with vertical dimension in lats
@@ -1008,6 +1040,7 @@ def test_regridder_vertical_dimension_detection():
     res = regridder(da)
     assert "lev" in res.dims
     assert res.shape == (3, 5, 10)
+
 
 def test_regridder_ugrid_with_time():
     # Setup mocked uxarray object with time dimension
@@ -1082,6 +1115,7 @@ def test_regridder_ugrid_with_time():
     assert "time" in res.dims
     assert res.shape == (1, 5, 10)
 
+
 def test_regridder_raw_ugrid_with_time():
     n_face = 10
     n_node = 12
@@ -1139,6 +1173,7 @@ def test_regridder_raw_ugrid_with_time():
     assert "time" in res.dims
     assert res.shape == (1, 18, 36)
 
+
 def test_regridder_user_specific_structure():
     # Mimic user's dataset structure: (time, node)
     # node is string coordinate, lat/lon are (node)
@@ -1191,6 +1226,7 @@ def test_regridder_user_specific_structure():
     assert res_ds["aod_550nm"].shape == (n_time, 18, 36)
     assert "node" not in res_ds["aod_550nm"].dims  # Space dimension should be replaced
     assert "mesh" in res_ds.data_vars  # Non-spatial data var should be preserved
+
 
 def test_regridder_raw_ugrid_conservative_with_time():
     n_face = 10
@@ -1250,6 +1286,7 @@ def test_regridder_raw_ugrid_conservative_with_time():
     assert "time" in res.dims
     assert res.shape == (1, 18, 36)
 
+
 def test_get_mesh_info_rectilinear_order():
     """Test that _get_mesh_info correctly handles rectilinear grids with different coord orders."""
     # Create a grid where coords are (lon, lat)
@@ -1266,6 +1303,7 @@ def test_get_mesh_info_rectilinear_order():
     assert shape == (lat.size, lon.size)
     assert lat_m.shape == (lat.size, lon.size)
     assert lon_m.shape == (lat.size, lon.size)
+
 
 def test_get_rdhpcs_cluster_detection():
     """Test machine detection in get_rdhpcs_cluster."""
@@ -1303,6 +1341,7 @@ def test_get_rdhpcs_cluster_detection():
             assert kwargs["queue"] == "u1-compute"
             assert kwargs["cores"] == 192
 
+
 def test_get_rdhpcs_cluster_explicit():
     """Test explicit machine specification in get_rdhpcs_cluster."""
     with patch("dask_jobqueue.SLURMCluster", MagicMock()) as mock_slurm:
@@ -1311,6 +1350,7 @@ def test_get_rdhpcs_cluster_explicit():
         assert kwargs["queue"] == "hera"
         assert kwargs["walltime"] == "02:00:00"
         assert kwargs["account"] == "test_acc"
+
 
 def test_create_global_grid():
     ds = create_global_grid(res_lat=10, res_lon=20)
@@ -1327,6 +1367,7 @@ def test_create_global_grid():
     assert ds.lon.attrs["standard_name"] == "longitude"
     assert "history" in ds.attrs
 
+
 def test_create_regional_grid():
     ds = create_regional_grid(
         lat_range=(-45, 45), lon_range=(0, 90), res_lat=5, res_lon=5
@@ -1339,6 +1380,7 @@ def test_create_regional_grid():
     assert np.isclose(ds.lat_b.min(), -45)
     assert np.isclose(ds.lat_b.max(), 45)
 
+
 def test_load_esmf_file(tmp_path):
     # Create a dummy NetCDF file
     filepath = os.path.join(tmp_path, "test_mesh.nc")
@@ -1349,6 +1391,7 @@ def test_load_esmf_file(tmp_path):
     assert "test" in ds_loaded
     assert "history" in ds_loaded.attrs
     assert "Loaded ESMF file" in ds_loaded.attrs["history"]
+
 
 def test_create_grid_from_crs():
     # Test with EPSG:32633 (UTM zone 33N)
@@ -1373,6 +1416,7 @@ def test_create_grid_from_crs():
     assert "crs" in ds.attrs
     assert "history" in ds.attrs
 
+
 def test_create_mesh_from_coords():
     x = np.array([400000, 450000, 500000])
     y = np.array([5000000, 5050000, 5100000])
@@ -1387,6 +1431,7 @@ def test_create_mesh_from_coords():
     assert "n_pts" in ds.lat.dims
 
     assert "crs" in ds.attrs
+
 
 def test_create_grid_from_crs_lazy_2():
     """
@@ -1417,6 +1462,7 @@ def test_create_grid_from_crs_lazy_2():
     # We use a small tolerance for floating point variations if any,
     # but since it's the same core function it should be exact.
     xr.testing.assert_allclose(ds_eager, ds_lazy.compute())
+
 
 def test_create_mesh_from_coords_lazy_2():
     """
