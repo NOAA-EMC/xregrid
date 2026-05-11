@@ -6,7 +6,8 @@ from xregrid.regridder import *
 
 try:
     import esmpy
-    if hasattr(esmpy, '_is_mock') or 'unittest.mock' in str(type(esmpy)):
+
+    if hasattr(esmpy, "_is_mock") or "unittest.mock" in str(type(esmpy)):
         raise ImportError
     HAS_REAL_ESMF = True
 except Exception:
