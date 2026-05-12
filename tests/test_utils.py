@@ -1,44 +1,30 @@
 from __future__ import annotations
 
 # Consolidated tests: utils
-from xregrid import *
-from xregrid.utils import *
-from xregrid.viz import *
-from xregrid.regridder import *
-from xregrid.grid import _get_mesh_info
+
+import os
 from unittest.mock import MagicMock, patch
+
 import dask.array as da
 import numpy as np
-import os
 import pytest
 import xarray as xr
 
-try:
-    import esmpy
-
-    if hasattr(esmpy, "_is_mock") or "unittest.mock" in str(type(esmpy)):
-        raise ImportError
-    HAS_REAL_ESMF = True
-except Exception:
-    HAS_REAL_ESMF = False
-
-try:
-    import esmpy
-
-    if hasattr(esmpy, "_is_mock") or "unittest.mock" in str(type(esmpy)):
-        raise ImportError
-    HAS_REAL_ESMF = True
-except:
-    HAS_REAL_ESMF = False
-
-try:
-    import esmpy
-
-    if hasattr(esmpy, "_is_mock") or "unittest.mock" in str(type(esmpy)):
-        raise ImportError
-    HAS_REAL_ESMF = True
-except (ImportError, Exception):
-    HAS_REAL_ESMF = False
+from xregrid import (
+    Regridder,
+    create_global_grid,
+    create_grid_from_crs,
+    create_grid_from_ioapi,
+    create_grid_like,
+    create_mesh_from_coords,
+    create_regional_grid,
+    get_rdhpcs_cluster,
+    load_esmf_file,
+    plot_comparison,
+    spatial_slice,
+)
+from xregrid.utils import get_crs_info
+from xregrid.grid import _get_mesh_info
 
 try:
     import esmpy
