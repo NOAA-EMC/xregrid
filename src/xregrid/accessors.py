@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Union
 
 import xarray as xr
 
@@ -24,9 +24,36 @@ class RegridDataArrayAccessor:
         """
         self._obj = xarray_obj
 
-    def to(self, target_grid: xr.Dataset, **kwargs: Any) -> xr.DataArray:
+    def to(
+        self, target_grid: Union[xr.Dataset, Regridder], **kwargs: Any
+    ) -> xr.DataArray:
         """
-        Regrid the DataArray to a target grid.
+        Regrid the DataArray to a target grid or using a pre-computed Regridder.
+
+        Parameters
+        ----------
+        target_grid : xr.Dataset or Regridder
+            The target grid dataset or an existing Regridder instance.
+        **kwargs : Any
+            Arguments passed to the Regridder constructor if target_grid is a Dataset.
+
+        Returns
+        -------
+        xr.DataArray
+            The regridded DataArray.
+        """
+        if isinstance(target_grid, Regridder):
+            return target_grid(self._obj)
+
+        # Convert DataArray to Dataset to ensure compatibility with Regridder
+        # if the Regridder needs to inspect the source grid.
+        source_ds = self._obj.to_dataset(name="_tmp_data")
+        regridder = Regridder(source_ds, target_grid, **kwargs)
+        return regridder(self._obj)
+
+    def get_regridder(self, target_grid: xr.Dataset, **kwargs: Any) -> Regridder:
+        """
+        Create a Regridder instance for this DataArray.
 
         Parameters
         ----------
@@ -37,13 +64,34 @@ class RegridDataArrayAccessor:
 
         Returns
         -------
-        xr.DataArray
-            The regridded DataArray.
+        Regridder
+            The initialized Regridder instance.
         """
-        # Convert DataArray to Dataset to ensure compatibility with Regridder
         source_ds = self._obj.to_dataset(name="_tmp_data")
-        regridder = Regridder(source_ds, target_grid, **kwargs)
-        return regridder(self._obj)
+        return Regridder(source_ds, target_grid, **kwargs)
+
+    def plot_diagnostics(
+        self, target_grid: xr.Dataset, mode: str = "static", **kwargs: Any
+    ) -> Any:
+        """
+        Visualize regridding diagnostics between this DataArray and a target grid.
+
+        Parameters
+        ----------
+        target_grid : xr.Dataset
+            The target grid dataset.
+        mode : str, default 'static'
+            The plotting mode: 'static' or 'interactive'.
+        **kwargs : Any
+            Arguments passed to Regridder.plot_diagnostics.
+
+        Returns
+        -------
+        Any
+            The plot object.
+        """
+        regridder = self.get_regridder(target_grid, **kwargs)
+        return regridder.plot_diagnostics(mode=mode, **kwargs)
 
 
 @xr.register_dataset_accessor("regrid")
@@ -63,9 +111,33 @@ class RegridDatasetAccessor:
         """
         self._obj = xarray_obj
 
-    def to(self, target_grid: xr.Dataset, **kwargs: Any) -> xr.Dataset:
+    def to(
+        self, target_grid: Union[xr.Dataset, Regridder], **kwargs: Any
+    ) -> xr.Dataset:
         """
-        Regrid the Dataset to a target grid.
+        Regrid the Dataset to a target grid or using a pre-computed Regridder.
+
+        Parameters
+        ----------
+        target_grid : xr.Dataset or Regridder
+            The target grid dataset or an existing Regridder instance.
+        **kwargs : Any
+            Arguments passed to the Regridder constructor if target_grid is a Dataset.
+
+        Returns
+        -------
+        xr.Dataset
+            The regridded Dataset.
+        """
+        if isinstance(target_grid, Regridder):
+            return target_grid(self._obj)
+
+        regridder = Regridder(self._obj, target_grid, **kwargs)
+        return regridder(self._obj)
+
+    def get_regridder(self, target_grid: xr.Dataset, **kwargs: Any) -> Regridder:
+        """
+        Create a Regridder instance for this Dataset.
 
         Parameters
         ----------
@@ -76,8 +148,30 @@ class RegridDatasetAccessor:
 
         Returns
         -------
-        xr.Dataset
-            The regridded Dataset.
+        Regridder
+            The initialized Regridder instance.
         """
-        regridder = Regridder(self._obj, target_grid, **kwargs)
-        return regridder(self._obj)
+        return Regridder(self._obj, target_grid, **kwargs)
+
+    def plot_diagnostics(
+        self, target_grid: xr.Dataset, mode: str = "static", **kwargs: Any
+    ) -> Any:
+        """
+        Visualize regridding diagnostics between this Dataset and a target grid.
+
+        Parameters
+        ----------
+        target_grid : xr.Dataset
+            The target grid dataset.
+        mode : str, default 'static'
+            The plotting mode: 'static' or 'interactive'.
+        **kwargs : Any
+            Arguments passed to Regridder.plot_diagnostics.
+
+        Returns
+        -------
+        Any
+            The plot object.
+        """
+        regridder = self.get_regridder(target_grid, **kwargs)
+        return regridder.plot_diagnostics(mode=mode, **kwargs)
