@@ -1494,6 +1494,7 @@ class Regridder:
         obj: Union[xr.DataArray, xr.Dataset, Any],
         skipna: Optional[bool] = None,
         na_thres: Optional[float] = None,
+        keep_attrs: bool = True,
     ) -> Union[xr.DataArray, xr.Dataset]:
         """
         Apply regridding to an input DataArray or Dataset.
@@ -1508,6 +1509,11 @@ class Regridder:
         na_thres : float, optional
             Threshold for NaN handling.
             If None, uses the value set during initialization.
+
+        keep_attrs : bool, default True
+            If True, merge input-object attributes onto the output.
+            Attributes set by the regridder (e.g. ``history``) take priority
+            so provenance is never lost.
 
         Returns
         -------
@@ -1534,6 +1540,8 @@ class Regridder:
             if self._tgt_was_sorted:
                 # Use sel to restore order from the original target grid
                 res = res.sel({d: self._orig_target_grid[d] for d in self._dims_target})
+            if keep_attrs:
+                res.attrs = {**obj.attrs, **res.attrs}
             return res
         elif isinstance(obj, xr.DataArray):
             # Check if DataArray is regriddable
@@ -1559,13 +1567,21 @@ class Regridder:
             if self._tgt_was_sorted:
                 # Use sel to restore order from the original target grid
                 res = res.sel({d: self._orig_target_grid[d] for d in self._dims_target})
+            if keep_attrs:
+                res.attrs = {**obj.attrs, **res.attrs}
             return res
         # Handle uxarray objects if they don't pass isinstance(xr.Dataset)
         elif hasattr(obj, "uxgrid"):
             if hasattr(obj, "data_vars"):
-                return self._regrid_dataset(obj, skipna=skipna, na_thres=na_thres)
+                res = self._regrid_dataset(obj, skipna=skipna, na_thres=na_thres)
+                if keep_attrs:
+                    res.attrs = {**obj.attrs, **res.attrs}
+                return res
             else:
-                return self._regrid_dataarray(obj, skipna=skipna, na_thres=na_thres)
+                res = self._regrid_dataarray(obj, skipna=skipna, na_thres=na_thres)
+                if keep_attrs:
+                    res.attrs = {**obj.attrs, **res.attrs}
+                return res
         else:
             raise TypeError("Input must be an xarray.DataArray or xarray.Dataset.")
 
