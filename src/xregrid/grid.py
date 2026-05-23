@@ -14,6 +14,9 @@ def _get_non_spatial_dims(ds: Union[xr.Dataset, xr.DataArray]) -> set[str]:
     """
     Identify dimensions that are likely not spatial (Time, Vertical).
 
+    Utilizes cf-xarray axes and standard names, followed by common name heuristics
+    and dtype checks.
+
     Parameters
     ----------
     ds : xr.Dataset or xr.DataArray
@@ -22,7 +25,7 @@ def _get_non_spatial_dims(ds: Union[xr.Dataset, xr.DataArray]) -> set[str]:
     Returns
     -------
     set of str
-        Names of non-spatial dimensions.
+        Names of non-spatial dimensions detected in the object.
     """
     non_spatial_dims = set()
 
@@ -38,8 +41,18 @@ def _get_non_spatial_dims(ds: Union[xr.Dataset, xr.DataArray]) -> set[str]:
         pass
 
     # 2. Heuristics based on dimension names
-    time_names = ["time", "t", "tden", "time_counter", "t_step"]
-    vert_names = [
+    time_names = {
+        "time",
+        "t",
+        "tden",
+        "time_counter",
+        "t_step",
+        "Time",
+        "T",
+        "date",
+        "dtime",
+    }
+    vert_names = {
         "lev",
         "level",
         "depth",
@@ -49,14 +62,42 @@ def _get_non_spatial_dims(ds: Union[xr.Dataset, xr.DataArray]) -> set[str]:
         "height",
         "altitude",
         "z",
-    ]
+        "Level",
+        "Layer",
+        "p",
+        "plev",
+        "bottom_top",
+        "top_bottom",
+    }
+
+    # Pre-compute lower-case set for efficient lookup
+    heuristic_names = {n.lower() for n in time_names | vert_names}
 
     for dim in ds.dims:
-        dim_lower = str(dim).lower()
-        if dim_lower in time_names or dim_lower in vert_names:
+        if str(dim).lower() in heuristic_names:
             non_spatial_dims.add(str(dim))
 
-        # 3. Dtype check for time if it's a coordinate
+    # 3. Use cf-xarray standard names
+    try:
+        std_time = ["time"]
+        std_vert = [
+            "air_pressure",
+            "height",
+            "depth",
+            "altitude",
+            "geopotential_height",
+            "height_above_msl",
+        ]
+        for std_name in std_time + std_vert:
+            if std_name in ds.cf.standard_names:
+                for var_name in ds.cf.standard_names[std_name]:
+                    if var_name in ds.dims:
+                        non_spatial_dims.add(str(var_name))
+    except (KeyError, AttributeError):
+        pass
+
+    # 4. Dtype check for time if it's a coordinate
+    for dim in ds.dims:
         if hasattr(ds, "coords") and dim in ds.coords:
             dtype = ds.coords[dim].dtype
             if np.issubdtype(dtype, np.datetime64) or np.issubdtype(

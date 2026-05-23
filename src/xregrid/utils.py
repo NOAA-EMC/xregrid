@@ -1025,28 +1025,29 @@ def create_grid_like(
 
     Automatically detects the CRS and spatial extent of the input object.
     Supports both geographic (lat-lon) and projected coordinate systems.
+    Efficiently handles Dask-backed objects by batching metadata discovery.
 
     Parameters
     ----------
     obj : xr.DataArray or xr.Dataset
         The input object to use as a template.
-    res : float or tuple of float
+    res : Union[float, Tuple[float, float]]
         New grid resolution in the coordinate system units.
         If tuple, (res_x, res_y) or (res_lon, res_lat).
     add_bounds : bool, default True
         Whether to add cell boundary coordinates.
-    chunks : int or dict, optional
+    chunks : Union[int, Dict[str, int]], optional
         Chunk sizes for the resulting dask-backed dataset.
-    extent : tuple of float, optional
+    extent : Tuple[float, float, float, float], optional
         Override the detected extent (min_x, max_x, min_y, max_y).
         Use this to avoid hidden dask.compute() if you already know the extent.
-    crs : str, int, or pyproj.CRS, optional
+    crs : Union[str, int, pyproj.CRS], optional
         Override the detected CRS.
 
     Returns
     -------
     xr.Dataset
-        The new grid dataset.
+        The new grid dataset with consistent metadata.
     """
     if crs is not None:
         if pyproj is not None:
@@ -1101,8 +1102,19 @@ def create_grid_like(
             if dask is not None and (
                 hasattr(x_b.data, "dask") or hasattr(y_b.data, "dask")
             ):
-                vals = dask.compute(x_b.min(), x_b.max(), y_b.min(), y_b.max())
-                extent = tuple(map(float, vals))
+                tasks_dict = {
+                    "xmin": x_b.min(),
+                    "xmax": x_b.max(),
+                    "ymin": y_b.min(),
+                    "ymax": y_b.max(),
+                }
+                results = dask.compute(tasks_dict)[0]
+                extent = (
+                    float(results["xmin"]),
+                    float(results["xmax"]),
+                    float(results["ymin"]),
+                    float(results["ymax"]),
+                )
             elif hasattr(x_b.data, "dask") or hasattr(y_b.data, "dask"):
                 extent = (
                     float(x_b.min()),
@@ -1211,9 +1223,15 @@ def create_grid_like(
             if dask is not None and (
                 hasattr(lat_b.data, "dask") or hasattr(lon_b.data, "dask")
             ):
-                vals = dask.compute(lat_b.min(), lat_b.max(), lon_b.min(), lon_b.max())
-                lat_range = (float(vals[0]), float(vals[1]))
-                lon_range = (float(vals[2]), float(vals[3]))
+                tasks_dict = {
+                    "lat_min": lat_b.min(),
+                    "lat_max": lat_b.max(),
+                    "lon_min": lon_b.min(),
+                    "lon_max": lon_b.max(),
+                }
+                results = dask.compute(tasks_dict)[0]
+                lat_range = (float(results["lat_min"]), float(results["lat_max"]))
+                lon_range = (float(results["lon_min"]), float(results["lon_max"]))
             elif hasattr(lat_b.data, "dask") or hasattr(lon_b.data, "dask"):
                 lat_range = (float(lat_b.min()), float(lat_b.max()))
                 lon_range = (float(lon_b.min()), float(lon_b.max()))

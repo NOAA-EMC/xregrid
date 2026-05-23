@@ -85,29 +85,37 @@ def _apply_weights_core(
     """
     Apply regridding weights to a data block (NumPy array).
 
+    Handles both standard regridding and NaN-aware regridding (skipna=True)
+    using efficient sparse matrix multiplication.
+
     Parameters
     ----------
     data_block : np.ndarray
         The input data block. Core dimensions must be at the end.
-    weights_matrix : scipy.sparse.csr_matrix or str
-        The sparse weight matrix or a string key for worker-local cache.
-    dims_source : tuple of str
+    weights_matrix : Any
+        The sparse weight matrix (scipy.sparse.csr_matrix) or a string key
+        referencing the matrix in the worker-local cache.
+    dims_source : Tuple[str, ...]
         The names of the source spatial dimensions.
-    shape_target : tuple of int
+    shape_target : Tuple[int, ...]
         The shape of the target spatial grid.
     skipna : bool, default False
-        Whether to handle NaNs by re-normalizing weights.
+        Whether to handle NaNs by re-normalizing weights based on the presence
+        of valid data in each cell.
     total_weights : np.ndarray, optional
-        Pre-computed sum of weights for each destination cell.
+        Pre-computed sum of weights for each destination cell. Used for
+        normalization when skipna=True or for masking low-confidence points.
     na_thres : float, default 1.0
-        Threshold for NaN handling.
+        Threshold for NaN handling. Points with less than this fraction of
+        valid input contribution will be masked.
     weights_key : str, optional
-        Explicit key for the weights in the worker cache.
+        Explicit key for the weights in the worker cache, used for stationary
+        mask optimization.
 
     Returns
     -------
     np.ndarray
-        The regridded data block.
+        The regridded data block reshaped to match the target grid.
     """
     # Worker-local cache retrieval
     weights_matrix_key = weights_key
@@ -163,17 +171,14 @@ def _apply_weights_core(
             is_mask_stationary = True
             if n_other > 1:
                 # Optimized stationary mask detection using heuristic early exit
-                #
                 mask0 = mask[0]
                 sample_size = min(1000, n_spatial)
                 # Check first sample points across all time steps first
                 if not np.all(mask[:, :sample_size] == mask0[:sample_size]):
                     is_mask_stationary = False
                 else:
-                    for i in range(1, n_other):
-                        if not np.array_equal(mask[i], mask0):
-                            is_mask_stationary = False
-                            break
+                    # Fallback to full comparison if sample matches
+                    is_mask_stationary = np.all(mask == mask[0:1])
 
             zero = flat_data.dtype.type(0)
             if is_mask_stationary:
