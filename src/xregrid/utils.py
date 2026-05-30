@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import os
 import socket
+import warnings
 from typing import Any, Dict, Optional, Tuple, Union
 
 import numpy as np
@@ -22,7 +23,89 @@ try:
 except ImportError:
     dask = None
 
+try:
+    import cubed
+except ImportError:
+    cubed = None
+
 import xarray as xr
+
+
+def is_cubed(obj: Any) -> bool:
+    """
+    Check if an object is a cubed array or a Dataset/DataArray containing one.
+
+    Parameters
+    ----------
+    obj : Any
+        The object to check.
+
+    Returns
+    -------
+    bool
+        True if the object is associated with cubed.
+    """
+    if cubed is None:
+        return False
+
+    if isinstance(obj, cubed.Array):
+        return True
+
+    if isinstance(obj, xr.DataArray):
+        return isinstance(obj.data, cubed.Array)
+
+    if isinstance(obj, xr.Dataset):
+        return any(isinstance(v.data, cubed.Array) for v in obj.data_vars.values())
+
+    return False
+
+
+def is_dask(obj: Any) -> bool:
+    """
+    Check if an object is a dask collection or a Dataset/DataArray containing one.
+
+    Parameters
+    ----------
+    obj : Any
+        The object to check.
+
+    Returns
+    -------
+    bool
+        True if the object is associated with dask.
+    """
+    if dask is None:
+        return False
+
+    from dask.base import is_dask_collection
+
+    if is_dask_collection(obj):
+        return True
+
+    if isinstance(obj, xr.DataArray):
+        return is_dask_collection(obj.data)
+
+    if isinstance(obj, xr.Dataset):
+        return any(is_dask_collection(v.data) for v in obj.data_vars.values())
+
+    return False
+
+
+def is_lazy(obj: Any) -> bool:
+    """
+    Check if an object is lazy (Dask or Cubed).
+
+    Parameters
+    ----------
+    obj : Any
+        The object to check.
+
+    Returns
+    -------
+    bool
+        True if the object is lazy.
+    """
+    return is_dask(obj) or is_cubed(obj)
 
 
 def _lazy_arange(
@@ -1088,6 +1171,52 @@ def create_grid_like(
                 crs_obj, extent, (res_x, res_y), add_bounds=add_bounds, chunks=chunks
             )
 
+    # Aero Optimization: Try to find extent in metadata before falling back to compute.
+    if extent is None:
+        try:
+            # Check for geospatial metadata (e.g. from NetCDF or GeoTIFF)
+            if "geospatial_lat_min" in obj.attrs and "geospatial_lat_max" in obj.attrs:
+                lat_range = (
+                    float(obj.attrs["geospatial_lat_min"]),
+                    float(obj.attrs["geospatial_lat_max"]),
+                )
+                lon_range = (
+                    float(obj.attrs.get("geospatial_lon_min", 0)),
+                    float(obj.attrs.get("geospatial_lon_max", 360)),
+                )
+                extent = (lon_range[0], lon_range[1], lat_range[0], lat_range[1])
+        except (KeyError, ValueError):
+            pass
+
+    if extent is not None:
+        if crs_obj is None or (
+            hasattr(crs_obj, "is_geographic") and crs_obj.is_geographic
+        ):
+            # Lat-Lon
+            return _create_rectilinear_grid(
+                (extent[2], extent[3]),  # lat_range
+                (extent[0], extent[1]),  # lon_range
+                res_y,  # res_lat
+                res_x,  # res_lon
+                add_bounds=add_bounds,
+                chunks=chunks,
+                crs=crs_obj.to_wkt() if hasattr(crs_obj, "to_wkt") else "EPSG:4326",
+                history_msg=history_msg_base + " (Override Extent).",
+            )
+        else:
+            # Projected
+            return create_grid_from_crs(
+                crs_obj, extent, (res_x, res_y), add_bounds=add_bounds, chunks=chunks
+            )
+
+    # Discovery logic: we need min/max. We use batch compute if lazy to minimize roundtrips.
+    # No Ambiguous Plots: provide a warning when triggering a hidden compute.
+    if is_lazy(obj):
+        warnings.warn(
+            f"Triggering hidden compute in create_grid_like to determine extent of {obj_name}. "
+            "To avoid this, provide 'extent' explicitly."
+        )
+
     # 1. Try to find projected coordinates
     try:
         x_da = obj.cf["projection_x_coordinate"]
@@ -1099,9 +1228,7 @@ def create_grid_like(
             y_b = obj.cf.get_bounds("projection_y_coordinate")
 
             # Batch compute if lazy to minimize roundtrips
-            if dask is not None and (
-                hasattr(x_b.data, "dask") or hasattr(y_b.data, "dask")
-            ):
+            if is_dask(x_b):
                 tasks_dict = {
                     "xmin": x_b.min(),
                     "xmax": x_b.max(),
@@ -1115,13 +1242,6 @@ def create_grid_like(
                     float(results["ymin"]),
                     float(results["ymax"]),
                 )
-            elif hasattr(x_b.data, "dask") or hasattr(y_b.data, "dask"):
-                extent = (
-                    float(x_b.min()),
-                    float(x_b.max()),
-                    float(y_b.min()),
-                    float(y_b.max()),
-                )
             else:
                 extent = (
                     float(x_b.min()),
@@ -1131,10 +1251,7 @@ def create_grid_like(
                 )
         except Exception:
             # Fallback to centers
-            # Discovery logic: we need min/max and average diff for heuristic
-            if dask is not None and (
-                hasattr(x_da.data, "dask") or hasattr(y_da.data, "dask")
-            ):
+            if is_dask(x_da):
                 # Batch everything!
                 tasks_dict = {
                     "x_min": x_da.min(),
@@ -1165,22 +1282,6 @@ def create_grid_like(
                     x_max + res_x_orig / 2,
                     y_min - res_y_orig / 2,
                     y_max + res_y_orig / 2,
-                )
-            elif hasattr(x_da.data, "dask") or hasattr(y_da.data, "dask"):
-                # Non-batched fallback
-                res_x_orig = (
-                    abs(float(x_da.diff(x_da.dims[0]).mean())) if x_da.size > 1 else 0
-                )
-                res_y_orig = (
-                    abs(float(y_da.diff(y_da.dims[0]).mean()))
-                    if y_da.size > 1
-                    else res_x_orig
-                )
-                extent = (
-                    float(x_da.min()) - res_x_orig / 2,
-                    float(x_da.max()) + res_x_orig / 2,
-                    float(y_da.min()) - res_y_orig / 2,
-                    float(y_da.max()) + res_y_orig / 2,
                 )
             else:
                 res_x_orig = (
@@ -1220,9 +1321,7 @@ def create_grid_like(
             lat_b = obj.cf.get_bounds("latitude")
             lon_b = obj.cf.get_bounds("longitude")
 
-            if dask is not None and (
-                hasattr(lat_b.data, "dask") or hasattr(lon_b.data, "dask")
-            ):
+            if is_dask(lat_b):
                 tasks_dict = {
                     "lat_min": lat_b.min(),
                     "lat_max": lat_b.max(),
@@ -1232,17 +1331,12 @@ def create_grid_like(
                 results = dask.compute(tasks_dict)[0]
                 lat_range = (float(results["lat_min"]), float(results["lat_max"]))
                 lon_range = (float(results["lon_min"]), float(results["lon_max"]))
-            elif hasattr(lat_b.data, "dask") or hasattr(lon_b.data, "dask"):
-                lat_range = (float(lat_b.min()), float(lat_b.max()))
-                lon_range = (float(lon_b.min()), float(lon_b.max()))
             else:
                 lat_range = (float(lat_b.min()), float(lat_b.max()))
                 lon_range = (float(lon_b.min()), float(lon_b.max()))
         except Exception:
             # Heuristic for resolution to calculate extent from centers
-            if dask is not None and (
-                hasattr(lat_da.data, "dask") or hasattr(lon_da.data, "dask")
-            ):
+            if is_dask(lat_da):
                 tasks_dict = {
                     "lat_min": lat_da.min(),
                     "lat_max": lat_da.max(),
@@ -1274,25 +1368,6 @@ def create_grid_like(
                 lon_range = (
                     lon_min - res_lon_orig / 2,
                     lon_max + res_lon_orig / 2,
-                )
-            elif hasattr(lat_da.data, "dask") or hasattr(lon_da.data, "dask"):
-                res_lat_orig = (
-                    abs(float(lat_da.diff(lat_da.dims[0]).mean()))
-                    if lat_da.size > 1
-                    else 0
-                )
-                res_lon_orig = (
-                    abs(float(lon_da.diff(lon_da.dims[-1]).mean()))
-                    if lon_da.size > 1
-                    else res_lat_orig
-                )
-                lat_range = (
-                    float(lat_da.min()) - res_lat_orig / 2,
-                    float(lat_da.max()) + res_lat_orig / 2,
-                )
-                lon_range = (
-                    float(lon_da.min()) - res_lon_orig / 2,
-                    float(lon_da.max()) + res_lon_orig / 2,
                 )
             else:
                 res_lat_orig = (
@@ -1390,8 +1465,8 @@ def create_mesh_from_coords(
         n_pts_chunks = None
 
     # Backend detection for provenance
-    is_lazy = chunks is not None or hasattr(x_da.data, "dask")
-    backend = "Lazy" if is_lazy else "Eager"
+    lazy_obj = chunks is not None or is_lazy(x_da)
+    backend = "Lazy" if lazy_obj else "Eager"
 
     # Use apply_ufunc with dask='parallelized'
     lon, lat = xr.apply_ufunc(
@@ -1456,7 +1531,7 @@ def create_mesh_from_coords(
     ds.attrs["crs"] = crs_obj.to_wkt()
 
     # Capture extents for provenance (careful with lazy arrays)
-    if not is_lazy:
+    if not lazy_obj:
         extent = (
             float(x_da.min()),
             float(x_da.max()),
@@ -1737,23 +1812,8 @@ def spatial_slice(
         # Aero Protocol: No Hidden Computes.
         # Decide if we can use drop=True. We avoid it for lazy data because
         # it forces a compute to determine the output shape.
-        is_lazy = False
-        try:
-            from dask.base import is_dask_collection
-
-            if is_dask_collection(obj) or is_dask_collection(mask):
-                is_lazy = True
-        except ImportError:
-            # Fallback for Dataset/DataArray robustness without dask installed
-            if hasattr(obj, "data_vars"):  # Dataset
-                is_lazy = any(hasattr(v.data, "dask") for v in obj.data_vars.values())
-            elif hasattr(obj, "data"):  # DataArray
-                is_lazy = hasattr(obj.data, "dask")
-
-            if not is_lazy and hasattr(mask, "data"):
-                is_lazy = hasattr(mask.data, "dask")
-
-        res = obj.where(mask, drop=not is_lazy)
+        lazy_obj = is_lazy(obj) or is_lazy(mask)
+        res = obj.where(mask, drop=not lazy_obj)
 
     # Metadata update
     msg = f"Spatially sliced to extent {extent} (wrapped={wrapped})"
