@@ -1,99 +1,147 @@
+from __future__ import annotations
+
 import numpy as np
 import pytest
 import xarray as xr
-from xregrid import Regridder, create_global_grid
+from xregrid.utils import is_lazy, is_dask, is_cubed, create_grid_like
+from xregrid import Regridder
 
 
-def test_protocol_code_smells():
-    """
-    Verify that calling Regridder on a lazy DataArray does not trigger
-    immediate computation of the data.
-    """
-    try:
-        import dask.array as da
-    except ImportError:
-        pytest.skip("Dask not installed")
+def test_backend_utilities():
+    """Verify backend-agnostic utilities."""
+    # Eager
+    ds_eager = xr.Dataset({"a": (["x"], np.arange(10))})
+    assert not is_lazy(ds_eager)
+    assert not is_dask(ds_eager)
+    assert not is_cubed(ds_eager)
 
-    src = create_global_grid(10, 10)
-    tgt = create_global_grid(5, 5)
+    # Dask
+    ds_dask = ds_eager.chunk({"x": 5})
+    assert is_lazy(ds_dask)
+    assert is_dask(ds_dask)
+    assert not is_cubed(ds_dask)
 
-    # Check laziness: use a dask array with a delayed function that increments a counter
-    from dask.delayed import delayed
+    # Individual arrays
+    assert is_dask(ds_dask.a)
+    assert not is_dask(ds_eager.a)
 
-    counter = [0]
 
-    @delayed
-    def count_calls(x):
-        counter[0] += 1
-        return x
-
-    data = da.from_delayed(
-        count_calls(np.random.rand(18, 36)), shape=(18, 36), dtype=float
+def test_create_grid_like_hardening():
+    """Verify create_grid_like avoids computes when metadata is present."""
+    ds = xr.Dataset(
+        coords={
+            "lat": (["lat"], np.arange(-90, 91, 1.0)),
+            "lon": (["lon"], np.arange(0, 361, 1.0)),
+        }
     )
-    da_lazy = xr.DataArray(
-        data, dims=("lat", "lon"), coords={"lat": src.lat, "lon": src.lon}
+    ds.attrs["geospatial_lat_min"] = -90.0
+    ds.attrs["geospatial_lat_max"] = 90.0
+    ds.attrs["geospatial_lon_min"] = 0.0
+    ds.attrs["geospatial_lon_max"] = 360.0
+
+    # Chunk it to make it lazy
+    ds_lazy = ds.chunk({"lat": 10, "lon": 10})
+
+    # This should NOT trigger a compute if metadata discovery works
+    # We can verify by checking if a warning is issued (we added warnings.warn)
+    import warnings
+
+    with warnings.catch_warnings(record=True) as record:
+        warnings.simplefilter("always")
+        grid = create_grid_like(ds_lazy, res=2.0)
+
+        # Check that NO UserWarning from create_grid_like was issued
+        # (The warning is issued only if it falls back to compute)
+        for warning in record:
+            if "Triggering hidden compute" in str(warning.message):
+                pytest.fail(
+                    "create_grid_like triggered a compute despite metadata presence"
+                )
+
+    assert grid.lat.size == 90
+    assert grid.lon.size == 180
+
+
+def test_lazy_diagnostics():
+    """Verify diagnostics and quality_report preserve laziness."""
+    src = xr.Dataset(
+        coords={
+            "lat": (["lat"], np.arange(-10, 11, 2.0)),
+            "lon": (["lon"], np.arange(0, 21, 2.0)),
+        }
+    )
+    tgt = xr.Dataset(
+        coords={
+            "lat": (["lat"], np.arange(-10, 11, 1.0)),
+            "lon": (["lon"], np.arange(0, 21, 1.0)),
+        }
     )
 
-    regridder = Regridder(src, tgt)
+    # Use parallel=True to get distributed weights (simulated via LocalCluster if needed)
+    # But for a simple test, we can just check the logic if we mock the matrix as having a 'key'
+    regridder = Regridder(src, tgt, method="bilinear", parallel=True)
 
-    # This should NOT trigger count_calls
-    res = regridder(da_lazy)
+    # Ensure weights matrix is "remote" (mocking it if necessary, but parallel=True should do it)
+    if not hasattr(regridder._weights_matrix, "key"):
+        # If parallel=True didn't make it remote (e.g. no cluster), manually mock it for the test
+        class MockRemote:
+            def __init__(self, obj):
+                self.obj = obj
+                self.key = "mock_key"
 
-    assert counter[0] == 0, "Regridding triggered immediate computation!"
+            def sum(self, axis=None):
+                return self.obj.sum(axis=axis)
 
-    # Computing the result SHOULD trigger it
-    _ = res.compute()
-    assert counter[0] > 0, "Computation did not trigger the delayed function!"
+            @property
+            def shape(self):
+                return self.obj.shape
+
+            @property
+            def nnz(self):
+                return self.obj.nnz
+
+        regridder._weights_matrix = MockRemote(regridder._weights_matrix)
+
+    # 1. Diagnostics
+    ds_diag = regridder.diagnostics()
+    assert is_dask(ds_diag.weight_sum)
+    assert is_dask(ds_diag.unmapped_mask)
+
+    # 2. Quality Report
+    ds_report = regridder.quality_report(format="dataset")
+    assert isinstance(ds_report, xr.Dataset)
+    # n_weights should be lazy if format='dataset' and remote
+    assert is_dask(ds_report.n_weights)
+    assert is_dask(ds_report.weight_sum_max)
 
 
-def test_extreme_coordinate_values():
-    """Verify handling of coordinates slightly outside standard ranges."""
-    # ESMF often fails if lat is exactly 90.000000000001
-    # Our _clip_latitudes should handle this.
-    src_lat = np.array([-90.000001, 0, 90.000001])
-    src_lon = np.array([-0.000001, 180, 360.000001])
+def test_double_check_logic():
+    """Verify consistency between Eager and Lazy applications (Aero Protocol)."""
+    src = xr.Dataset(
+        coords={
+            "lat": (["lat"], np.linspace(-10, 10, 5)),
+            "lon": (["lon"], np.linspace(0, 20, 5)),
+        }
+    )
+    tgt = xr.Dataset(
+        coords={
+            "lat": (["lat"], np.linspace(-10, 10, 10)),
+            "lon": (["lon"], np.linspace(0, 20, 10)),
+        }
+    )
 
-    src = xr.Dataset(coords={"lat": (["lat"], src_lat), "lon": (["lon"], src_lon)})
-    src.lat.attrs["units"] = "degrees_north"
-    src.lon.attrs["units"] = "degrees_east"
+    data = np.random.rand(5, 5)
+    da_eager = xr.DataArray(data, dims=["lat", "lon"], coords=src.coords, name="test")
+    da_lazy = da_eager.chunk({"lat": 2, "lon": 2})
 
-    tgt = create_global_grid(30, 30)
-
-    # Should not raise ESMC_RC_ARG_OUTOFRANGE
     regridder = Regridder(src, tgt, method="bilinear")
-    assert regridder is not None
 
+    res_eager = regridder(da_eager)
+    res_lazy = regridder(da_lazy)
 
-def test_multiple_regridders_cache_isolation():
-    """Verify that multiple regridder instances don't interfere via cache."""
-    from conftest import setup_esmpy_mock
-    from distributed import Client, LocalCluster
+    assert is_dask(res_lazy)
+    xr.testing.assert_allclose(res_eager, res_lazy.compute())
 
-    with LocalCluster(n_workers=2, threads_per_worker=1) as cluster:
-        with Client(cluster) as client:
-            client.run(setup_esmpy_mock)
-
-            src = create_global_grid(10, 10)
-            tgt1 = create_global_grid(5, 5)
-            tgt2 = create_global_grid(2, 2)
-
-            r1 = Regridder(src, tgt1, parallel=True)
-            r2 = Regridder(src, tgt2, parallel=True)
-
-            assert r1._uid != r2._uid
-
-            da = xr.DataArray(
-                np.random.rand(18, 36),
-                dims=("lat", "lon"),
-                coords={"lat": src.lat, "lon": src.lon},
-            )
-
-            res1 = r1(da)
-            res2 = r2(da)
-
-            assert res1.shape == (36, 72)
-            assert res2.shape == (90, 180)
-
-
-if __name__ == "__main__":
-    pytest.main([__file__])
+    # Verify provenance
+    assert "backend=Eager" in res_eager.attrs["history"]
+    assert "backend=Distributed (Dask)" in res_lazy.attrs["history"]

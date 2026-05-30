@@ -9,7 +9,7 @@ import numpy as np
 import xarray as xr
 from scipy.sparse import coo_matrix
 
-from xregrid.utils import update_history, get_crs_info
+from xregrid.utils import update_history, get_crs_info, is_lazy, is_dask, is_cubed
 from xregrid.constants import (
     get_regrid_method_map,
     get_extrap_method_map,
@@ -32,33 +32,6 @@ from xregrid.parallel import (
 if TYPE_CHECKING:
     import dask.distributed
     from scipy.sparse import csr_matrix
-
-try:
-    from dask.base import is_dask_collection
-except ImportError:
-    is_dask_collection = None  # type: ignore
-
-
-def is_cubed_collection(obj: Any) -> bool:
-    """
-    Check if an object is a cubed array.
-
-    Parameters
-    ----------
-    obj : Any
-        The object to check.
-
-    Returns
-    -------
-    bool
-        True if the object is a cubed array.
-    """
-    try:
-        import cubed
-
-        return isinstance(obj, cubed.Array)
-    except ImportError:
-        return False
 
 
 # Global cache for the driver to store distributed futures
@@ -1087,14 +1060,16 @@ class Regridder:
             - unmapped_mask: Boolean mask (1 for unmapped cells, 0 for mapped).
         """
         if self._weights_matrix is None:
-            raise RuntimeError("Weights have not been generated yet.")
+            if self.parallel and self._dask_futures:
+                self.compute()
+            else:
+                raise RuntimeError("Weights have not been generated yet.")
 
         is_remote = hasattr(self._weights_matrix, "key")
         if is_remote:
             # Distributed lazy diagnostics
             import dask
             import dask.array as da
-            import dask.distributed
 
             if self._total_weights is None:
                 self._total_weights = self._dask_client.submit(
@@ -1173,7 +1148,7 @@ class Regridder:
             If True, skip metrics that require full weight matrix summation
             (expensive for massive grids).
         format : str, default 'dict'
-            The output format: 'dict' or 'dataset'.
+            The output format: 'dict' (eager) or 'dataset' (potentially lazy).
 
         Returns
         -------
@@ -1189,7 +1164,10 @@ class Regridder:
             - n_weights: Total number of non-zero weights.
         """
         if self._weights_matrix is None:
-            raise RuntimeError("Weights have not been generated yet.")
+            if self.parallel and self._dask_futures:
+                self.compute()
+            else:
+                raise RuntimeError("Weights have not been generated yet.")
 
         # Distributed metrics.
         # Compute metrics on the cluster if weights are remote to avoid driver OOM.
@@ -1205,7 +1183,6 @@ class Regridder:
                 try:
                     import dask
                     import dask.array as da
-                    import dask.distributed
 
                     client = self._dask_client or dask.distributed.get_client()
                     n_weights_future = client.submit(
@@ -1251,7 +1228,7 @@ class Regridder:
             weight_sum_mean = weights_sum.mean()
 
             if format == "dict":
-                # Convert to eager values for dict format
+                # Convert to eager values for dict format (may trigger compute)
                 report.update(
                     {
                         "unmapped_count": int(unmapped_count),
@@ -1531,6 +1508,17 @@ class Regridder:
         # Aero Protocol: Weight dispatch is now handled per-variable in _regrid_dataarray
         # to robustly support mixed-backend (NumPy/Dask) Datasets.
 
+        if is_dask(obj) and not self.parallel:
+            # Scientific Hygiene: Warn user if applying regridder to Dask data
+            # but weights were generated in serial (non-Dask) mode.
+            # This is technically supported but suboptimal for performance.
+            import warnings
+
+            warnings.warn(
+                "Applying serial Regridder to Dask-backed data. "
+                "For better performance, initialize Regridder with parallel=True."
+            )
+
         if isinstance(obj, xr.Dataset):
             # Sort input object if source grid was normalized
             if self._src_was_sorted:
@@ -1626,19 +1614,14 @@ class Regridder:
             na_thres = self.na_thres
 
         # Backend-agnostic laziness detection
-        is_cubed = is_cubed_collection(da_in.data)
-
-        is_dask = False
-        if is_dask_collection:
-            is_dask = is_dask_collection(da_in.data) and not is_cubed
-        else:
-            is_dask = hasattr(da_in.data, "dask") and not is_cubed
+        lazy_cubed = is_cubed(da_in)
+        lazy_dask = is_dask(da_in)
 
         # Just-in-Time weight gathering for mixed-backend support.
         # If the input is NOT Dask-backed (e.g., NumPy or Cubed) but weights
         # are still remote Dask Futures, we must gather them to the driver
         # for local application or for passing to the alternative lazy backend.
-        if not is_dask and hasattr(self._weights_matrix, "key"):
+        if not lazy_dask and hasattr(self._weights_matrix, "key"):
             self._weights_matrix = self._dask_client.gather(self._weights_matrix)
             if hasattr(self._total_weights, "key"):
                 self._total_weights = self._dask_client.gather(self._total_weights)
@@ -1766,7 +1749,7 @@ class Regridder:
 
         # Optimization: Use worker-local cache for weights and total_weights to avoid
         # serialization overhead when using Dask.
-        if is_dask:
+        if lazy_dask:
             client = self._dask_client
             if client is None:
                 try:
@@ -1827,11 +1810,13 @@ class Regridder:
         # For Cubed backend, we must ensure core dimensions are not chunked
         # before calling apply_ufunc, because Cubed's apply_gufunc does not
         # support multiple chunks in core dimensions.
-        if is_cubed:
+        if lazy_cubed:
             # Rechunk core dimensions to -1 (single chunk)
             # We use cubed.Array.rechunk directly if possible to avoid Dask conversion
             # if da_in.data is a cubed.Array.
-            if is_cubed_collection(da_in.data):
+            import cubed
+
+            if isinstance(da_in.data, cubed.Array):
                 # Map logical dimensions to numeric axes for rechunking
                 axes_to_rechunk = {}
                 for i, d in enumerate(da_in.dims):
@@ -2009,9 +1994,9 @@ class Regridder:
             except ImportError:
                 esmpy_version = "unknown"
 
-            if is_dask:
+            if lazy_dask:
                 backend = "Distributed (Dask)"
-            elif is_cubed:
+            elif lazy_cubed:
                 backend = "Distributed (Cubed)"
             else:
                 backend = "Eager"
@@ -2060,13 +2045,7 @@ class Regridder:
                     return True
 
                 # 2. Check eager values (dimension coordinates are eager in xarray)
-                is_lazy = False
-                if is_dask_collection:
-                    is_lazy = is_dask_collection(lon.data)
-                else:
-                    is_lazy = hasattr(lon.data, "dask")
-
-                if not is_lazy:
+                if not is_lazy(lon):
                     lon_min = float(lon.min())
                     lon_max = float(lon.max())
                     extent = lon_max - lon_min
@@ -2277,20 +2256,12 @@ class Regridder:
             esmpy_version = "unknown"
 
         # For a Dataset, we check if any data variable is lazy
-        is_cubed = any(is_cubed_collection(da.data) for da in ds_in.data_vars.values())
-        is_dask = any(
-            (
-                is_dask_collection(da.data)
-                if is_dask_collection
-                else hasattr(da.data, "dask")
-            )
-            and not is_cubed_collection(da.data)
-            for da in ds_in.data_vars.values()
-        )
+        lazy_cubed = is_cubed(ds_in)
+        lazy_dask = is_dask(ds_in)
 
-        if is_dask:
+        if lazy_dask:
             backend = "Distributed (Dask)"
-        elif is_cubed:
+        elif lazy_cubed:
             backend = "Distributed (Cubed)"
         else:
             backend = "Eager"
