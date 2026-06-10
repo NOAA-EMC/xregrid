@@ -5,7 +5,7 @@ scipy
 dask
 cubed
 cubed-xarray
-zarr<3
+zarr>=3.1.2
 netCDF4
 esmpy
 cf-xarray

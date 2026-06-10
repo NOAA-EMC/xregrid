@@ -225,14 +225,12 @@ class Regridder:
                 target_grid_ds, method=method, is_source=False
             )
 
-            # Use SPH_DEG if:
-            # 1. periodic=True
-            # 2. OR it's geographic AND either grid is unstructured (to handle dateline crossing swaths)
-            # Structured non-periodic grids continue using CART by default to maintain
-            # backward compatibility and avoid unwanted wrap-around in regional cases.
-            if periodic or (
-                is_geographic and (is_unstructured_src or is_unstructured_tgt)
-            ):
+            # Use SPH_DEG for all geographic (lat/lon in degrees) grids.
+            # Using CART for geographic data is incorrect: ESMF's CART coordinate
+            # system expects Cartesian (x, y, z) values, not lat/lon in degrees.
+            # SPH_DEG correctly handles both periodic and non-periodic spherical grids,
+            # as well as rectilinear, curvilinear, and unstructured conventions.
+            if is_geographic:
                 self._coord_sys = get_coord_sys("SPH_DEG")
             else:
                 self._coord_sys = get_coord_sys("CART")
@@ -2045,9 +2043,20 @@ class Regridder:
                     return True
 
                 # 2. Check eager values (dimension coordinates are eager in xarray)
-                if not is_lazy(lon):
-                    lon_min = float(lon.min())
-                    lon_max = float(lon.max())
+                lon_for_check = lon
+                if is_lazy(lon) and lon.ndim == 2:
+                    # 2D curvilinear lazy lon: sample the first row to check extent
+                    # cheaply without triggering a full compute.
+                    try:
+                        lon_for_check = lon.isel({lon.dims[0]: 0}).compute()
+                    except Exception:
+                        lon_for_check = None
+                elif is_lazy(lon):
+                    lon_for_check = None
+
+                if lon_for_check is not None:
+                    lon_min = float(lon_for_check.min())
+                    lon_max = float(lon_for_check.max())
                     extent = lon_max - lon_min
                     # ESMF periodic grids must have extent strictly less than 360
                     # because the periodicity is handled by connecting the last point to the first.

@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python>=3.9,<3.14
+  - python>=3.11,<3.14
   - esmpy
   - xesmf
   - xarray
@@ -14,7 +14,7 @@ dependencies:
   - dask
   - cubed
   - cubed-xarray
-  - zarr<3
+  - zarr>=3.1.2
   - netcdf4
   - pandas
   - matplotlib
