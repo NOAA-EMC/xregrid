@@ -2043,16 +2043,34 @@ class Regridder:
                     return True
 
                 # 2. Check eager values (dimension coordinates are eager in xarray)
-                lon_for_check = lon
-                if is_lazy(lon) and lon.ndim == 2:
-                    # 2D curvilinear lazy lon: sample the first row to check extent
-                    # cheaply without triggering a full compute.
+                lon_for_check = None
+                if not is_lazy(lon):
+                    # Already in memory
+                    lon_for_check = lon
+                elif lon.ndim == 1 and lon.name in lon.dims:
+                    # Xarray dimension coordinates are usually eager even if data is lazy,
+                    # but we check is_lazy(lon) above to be sure.
+                    # If we are here, it means it reported as lazy.
+                    lon_for_check = None
+                else:
+                    # Lazy 2D or non-dimension 1D coordinate.
+                    # Aero Protocol: Avoid hidden computes.
+                    # We emit a warning if we are forced to compute to detect periodicity.
+                    import warnings
+
+                    warnings.warn(
+                        f"Triggering hidden compute in _detect_periodicity for lazy coordinate '{lon.name}'. "
+                        "To avoid this, provide 'periodic' explicitly in Regridder constructor "
+                        "or set the 'boundary' attribute to 'periodic' in your longitude coordinate."
+                    )
                     try:
-                        lon_for_check = lon.isel({lon.dims[0]: 0}).compute()
+                        # Sample the first row to check extent cheaply without triggering a full compute.
+                        if lon.ndim == 2:
+                            lon_for_check = lon.isel({lon.dims[0]: 0}).compute()
+                        else:
+                            lon_for_check = lon.compute()
                     except Exception:
                         lon_for_check = None
-                elif is_lazy(lon):
-                    lon_for_check = None
 
                 if lon_for_check is not None:
                     lon_min = float(lon_for_check.min())
