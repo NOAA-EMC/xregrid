@@ -108,12 +108,57 @@ def is_lazy(obj: Any) -> bool:
     return is_dask(obj) or is_cubed(obj)
 
 
+def _get_array_namespace(*objs: Any) -> Any:
+    """
+    Get the appropriate array namespace (numpy, dask.array, or cubed) for the given objects.
+
+    Parameters
+    ----------
+    *objs : Any
+        The objects to check for backend.
+
+    Returns
+    -------
+    module
+        The array namespace module (np, da, or cubed).
+    """
+    if cubed is not None and any(is_cubed(obj) for obj in objs):
+        return cubed
+    if da is not None and any(is_dask(obj) for obj in objs):
+        return da
+    return np
+
+
 def _lazy_arange(
     start: float, stop: float, step: float, chunks: Optional[int] = None
 ) -> Any:
-    """Helper to create a lazy dask range or eager numpy range."""
-    if chunks is not None and da is not None:
-        return da.arange(start, stop, step, chunks=chunks)
+    """
+    Create a lazy or eager range.
+
+    Parameters
+    ----------
+    start : float
+        Start of interval.
+    stop : float
+        End of interval.
+    step : float
+        Spacing between values.
+    chunks : int, optional
+        Chunk size for lazy array.
+
+    Returns
+    -------
+    Any
+        The range array (numpy, dask, or cubed).
+    """
+    if chunks is not None:
+        if cubed is not None:
+            # Cubed uses numpy-like arange but with explicit chunking if needed
+            # however cubed doesn't have a direct arange, usually created via from_array or similar
+            # for now, we prioritize dask for arange if available, then fallback.
+            pass
+        if da is not None:
+            return da.arange(start, stop, step, chunks=chunks)
     return np.arange(start, stop, step)
 
 
@@ -189,12 +234,9 @@ def _create_rectilinear_grid(
             lon_range[0], lon_range[1] + res_lon, res_lon, chunks=lon_chunks
         )[: lon_arr.size + 1]
 
-        if chunks is not None and da is not None:
-            lat_b_2d = da.stack([lat_b_1d[:-1], lat_b_1d[1:]], axis=1)
-            lon_b_2d = da.stack([lon_b_1d[:-1], lon_b_1d[1:]], axis=1)
-        else:
-            lat_b_2d = np.stack([lat_b_1d[:-1], lat_b_1d[1:]], axis=1)
-            lon_b_2d = np.stack([lon_b_1d[:-1], lon_b_1d[1:]], axis=1)
+        xp = _get_array_namespace(lat_b_1d, lon_b_1d)
+        lat_b_2d = xp.stack([lat_b_1d[:-1], lat_b_1d[1:]], axis=1)
+        lon_b_2d = xp.stack([lon_b_1d[:-1], lon_b_1d[1:]], axis=1)
 
         ds.coords["lat_b"] = (
             ["lat", "nv"],
@@ -677,20 +719,9 @@ def create_grid_from_crs(
     ds.attrs["crs"] = crs_obj.to_wkt()
 
     if add_bounds:
-        if chunks is not None and da is not None:
-            x_b_raw = da.stack(
-                [x - res_x / 2, x + res_x / 2, x + res_x / 2, x - res_x / 2]
-            )
-            y_b_raw = da.stack(
-                [y - res_y / 2, y - res_y / 2, y + res_y / 2, y + res_y / 2]
-            )
-        else:
-            x_b_raw = np.stack(
-                [x - res_x / 2, x + res_x / 2, x + res_x / 2, x - res_x / 2]
-            )
-            y_b_raw = np.stack(
-                [y - res_y / 2, y - res_y / 2, y + res_y / 2, y + res_y / 2]
-            )
+        xp = _get_array_namespace(x, y)
+        x_b_raw = xp.stack([x - res_x / 2, x + res_x / 2, x + res_x / 2, x - res_x / 2])
+        y_b_raw = xp.stack([y - res_y / 2, y - res_y / 2, y + res_y / 2, y + res_y / 2])
 
         x_b_da = xr.DataArray(x_b_raw, dims=["nv", "x"])
         y_b_da = xr.DataArray(y_b_raw, dims=["nv", "y"])
@@ -742,7 +773,11 @@ def create_grid_from_crs(
     is_lazy = chunks is not None
     backend = "Lazy" if is_lazy else "Eager"
 
-    update_history(ds, f"Created grid from CRS {crs} using xregrid ({backend}).")
+    # Add extra metadata about the generated bounds if present
+    bounds_msg = " with cell bounds" if add_bounds else ""
+    update_history(
+        ds, f"Created grid from CRS {crs} using xregrid ({backend}){bounds_msg}."
+    )
     if chunks is not None:
         ds = ds.chunk(chunks)
     return ds
