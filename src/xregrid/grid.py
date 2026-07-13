@@ -6,7 +6,7 @@ import cf_xarray  # noqa: F401
 import numpy as np
 import xarray as xr
 
-from .utils import _find_coord
+from .utils import _find_coord, is_lazy
 from .constants import get_coord_sys
 
 
@@ -177,8 +177,16 @@ def _get_mesh_info(
             # If they share same dim, it's unstructured
             if lat.dims == lon.dims:
                 # Apply filtering before returning
-                lat_isel = {d: 0 for d in non_spatial_dims if d in lat.dims}
-                lon_isel = {d: 0 for d in non_spatial_dims if d in lon.dims}
+                lat_isel = {
+                    d: 0
+                    for d in non_spatial_dims
+                    if d in lat.dims and len(lat.dims) > 1
+                }
+                lon_isel = {
+                    d: 0
+                    for d in non_spatial_dims
+                    if d in lon.dims and len(lon.dims) > 1
+                }
                 if lat_isel:
                     lat = lat.isel(lat_isel, drop=True)
                 if lon_isel:
@@ -271,8 +279,8 @@ def _get_mesh_info(
         raise KeyError("Could not find longitude coordinates matching latitude.")
 
     # Filter out non-spatial dimensions if they are present in lat/lon
-    lat_isel = {d: 0 for d in non_spatial_dims if d in lat.dims}
-    lon_isel = {d: 0 for d in non_spatial_dims if d in lon.dims}
+    lat_isel = {d: 0 for d in non_spatial_dims if d in lat.dims and len(lat.dims) > 1}
+    lon_isel = {d: 0 for d in non_spatial_dims if d in lon.dims and len(lon.dims) > 1}
     if lat_isel:
         lat = lat.isel(lat_isel, drop=True)
     if lon_isel:
@@ -315,7 +323,44 @@ def _get_mesh_info(
                 break
 
     if lat.ndim == 2:
-        # Curvilinear
+        # Check if a 2D lat/lon is actually separable (regular grid stored as curvilinear).
+        # This is common for GRIB2/grib2io output: latitude varies only with the first dim
+        # and longitude varies only with the second dim.  Detecting this early avoids
+        # sending a large 2D coordinate array to ESMF when a 1D pair would be faster.
+        if not is_lazy(lat) and not is_lazy(lon):
+            try:
+                import numpy as _np
+
+                lat_vals = lat.values
+                lon_vals = lon.values
+                # Separable if std-dev along axis of variation is ~0 for the *other* axis.
+                # lat should be constant along dim-1 (columns), lon constant along dim-0 (rows).
+                lat_col_std = float(
+                    _np.nanstd(lat_vals - lat_vals[:, :1], axis=1).max()
+                )
+                lon_row_std = float(
+                    _np.nanstd(lon_vals - lon_vals[:1, :], axis=0).max()
+                )
+                if lat_col_std < 1e-6 and lon_row_std < 1e-6:
+                    lat_1d = xr.DataArray(
+                        lat_vals[:, 0], dims=[lat.dims[0]], attrs=lat.attrs
+                    )
+                    lon_1d = xr.DataArray(
+                        lon_vals[0, :], dims=[lon.dims[1]], attrs=lon.attrs
+                    )
+                    lon_mesh, lat_mesh = xr.broadcast(lon_1d, lat_1d)
+                    lon_mesh = lon_mesh.transpose(lat_1d.dims[0], lon_1d.dims[0])
+                    lat_mesh = lat_mesh.transpose(lat_1d.dims[0], lon_1d.dims[0])
+                    return (
+                        lon_mesh,
+                        lat_mesh,
+                        (lat_1d.size, lon_1d.size),
+                        (lat_1d.dims[0], lon_1d.dims[0]),
+                        False,
+                    )
+            except Exception:
+                pass
+        # General curvilinear
         if lon.ndim == 2 and lon.dims != lat.dims and set(lon.dims) == set(lat.dims):
             lon = lon.transpose(*lat.dims)
         return lon, lat, lat.shape, lat.dims, False
@@ -863,6 +908,9 @@ def _create_esmf_grid(
     """
     import esmpy
 
+    if isinstance(coord_sys, str):
+        coord_sys = get_coord_sys(coord_sys)
+
     non_spatial_dims = _get_non_spatial_dims(ds)
     lon, lat, shape, dims, is_unstructured = _get_mesh_info(
         ds, method=method, is_source=is_source
@@ -977,6 +1025,15 @@ def _create_esmf_grid(
         lon_f = _normalize_longitudes(_to_degrees(lon)).values.T
         lat_f = _clip_latitudes(_to_degrees(lat)).values.T
         shape_f = lon_f.shape
+
+        # ESMF periodic grids require at least 2 cells in the periodic dimension.
+        # Degenerate grids (e.g., Nx1 point-like layouts) can be misdetected as
+        # periodic and cause GridCreate1PeriDim failures.
+        if periodic and shape_f[0] < 2:
+            periodic = False
+            provenance.append(
+                "Disabled periodic handling for degenerate grid (periodic dimension < 2 cells)."
+            )
 
         num_peri_dims = 1 if periodic else None
         periodic_dim = 0 if periodic else None

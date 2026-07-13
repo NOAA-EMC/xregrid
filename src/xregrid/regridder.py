@@ -9,7 +9,13 @@ import numpy as np
 import xarray as xr
 from scipy.sparse import coo_matrix
 
-from xregrid.utils import update_history, get_crs_info
+from xregrid.utils import (
+    update_history,
+    get_crs_info,
+    is_dask,
+    is_cubed,
+    _get_min_max_lazy_aware,
+)
 from xregrid.constants import (
     get_regrid_method_map,
     get_extrap_method_map,
@@ -32,33 +38,6 @@ from xregrid.parallel import (
 if TYPE_CHECKING:
     import dask.distributed
     from scipy.sparse import csr_matrix
-
-try:
-    from dask.base import is_dask_collection
-except ImportError:
-    is_dask_collection = None  # type: ignore
-
-
-def is_cubed_collection(obj: Any) -> bool:
-    """
-    Check if an object is a cubed array.
-
-    Parameters
-    ----------
-    obj : Any
-        The object to check.
-
-    Returns
-    -------
-    bool
-        True if the object is a cubed array.
-    """
-    try:
-        import cubed
-
-        return isinstance(obj, cubed.Array)
-    except ImportError:
-        return False
 
 
 # Global cache for the driver to store distributed futures
@@ -252,21 +231,22 @@ class Regridder:
                 target_grid_ds, method=method, is_source=False
             )
 
-            # Use SPH_DEG if:
-            # 1. periodic=True
-            # 2. OR it's geographic AND either grid is unstructured (to handle dateline crossing swaths)
-            # Structured non-periodic grids continue using CART by default to maintain
-            # backward compatibility and avoid unwanted wrap-around in regional cases.
-            if periodic or (
-                is_geographic and (is_unstructured_src or is_unstructured_tgt)
-            ):
+            # Use SPH_DEG for all geographic (lat/lon in degrees) grids.
+            # Using CART for geographic data is incorrect: ESMF's CART coordinate
+            # system expects Cartesian (x, y, z) values, not lat/lon in degrees.
+            # SPH_DEG correctly handles both periodic and non-periodic spherical grids,
+            # as well as rectilinear, curvilinear, and unstructured conventions.
+            if is_geographic:
+                self._coord_sys_str = "SPH_DEG"
                 self._coord_sys = get_coord_sys("SPH_DEG")
             else:
+                self._coord_sys_str = "CART"
                 self._coord_sys = get_coord_sys("CART")
 
             self.method_map = get_regrid_method_map()
             self.extrap_method_map = get_extrap_method_map()
         else:
+            self._coord_sys_str = None
             self._coord_sys = None
             self.method_map = {}
             self.extrap_method_map = {}
@@ -508,7 +488,7 @@ class Regridder:
             self.method,
             periodic=self.periodic if is_source else False,
             mask_var=self.mask_var if is_source else None,
-            coord_sys=self._coord_sys,
+            coord_sys=self._coord_sys_str,
             is_source=is_source,
         )
 
@@ -608,14 +588,33 @@ class Regridder:
 
         weights = regrid.get_weights_dict(deep_copy=True)
 
-        # Map to original indices if Mesh elements were triangulated
+        # Map to original indices and scale weights if Mesh elements were triangulated.
+        # ESMF computes conservative weights using the triangulated element areas
+        # as the denominator, which silently multiplies the weights when mapped back.
+        if dst_orig_idx is not None and self.method == "conservative":
+            dst_field.get_area()
+            dst_areas = np.asarray(dst_field.data)
+            n_dst = int(np.prod(self._shape_target))
+            orig_dst_areas = np.bincount(
+                dst_orig_idx, weights=dst_areas, minlength=n_dst
+            )
+
+            # Avoid division by zero
+            scale_factors = np.zeros_like(dst_areas)
+            valid = orig_dst_areas[dst_orig_idx] > 0
+            scale_factors[valid] = (
+                dst_areas[valid] / orig_dst_areas[dst_orig_idx][valid]
+            )
+
+            row_dst_idx = weights["row_dst"] - 1
+            weights["weights"] = weights["weights"] * scale_factors[row_dst_idx]
+            weights["row_dst"] = dst_orig_idx[row_dst_idx] + 1
+
+        if src_orig_idx is not None and self.method == "conservative":
+            weights["col_src"] = src_orig_idx[weights["col_src"] - 1] + 1
+
         row_dst = weights["row_dst"] - 1
         col_src = weights["col_src"] - 1
-
-        if dst_orig_idx is not None and self.method == "conservative":
-            row_dst = dst_orig_idx[row_dst]
-        if src_orig_idx is not None and self.method == "conservative":
-            col_src = src_orig_idx[col_src]
 
         # Handle MPI gathering if multiple ranks are present
         pet_count = esmpy.pet_count()
@@ -637,14 +636,8 @@ class Regridder:
                     for i, w in enumerate(all_weights):
                         r = w["row_dst"] - 1
                         c = w["col_src"] - 1
-                        # Note: orig_idx is not easily gathered via ESMF weights dict
-                        # but here we are in serial-equivalent rank 0 gathering.
-                        # Actually, each rank might have different triangulation?
-                        # No, triangulation should be deterministic.
-                        if dst_orig_idx is not None:
-                            r = dst_orig_idx[r]
-                        if src_orig_idx is not None:
-                            c = src_orig_idx[c]
+                        # Note: we already mapped and scaled the weights locally on each PET,
+                        # so we DO NOT need to apply dst_orig_idx or src_orig_idx here!
                         rows.append(r)
                         cols.append(c)
                         data.append(w["weights"])
@@ -768,7 +761,7 @@ class Regridder:
                     self.extrap_dist_exponent,
                     self.mask_var,
                     self.periodic,
-                    coord_sys=self._coord_sys,
+                    coord_sys=self._coord_sys_str,
                 )
                 futures.append(future)
         else:
@@ -823,7 +816,7 @@ class Regridder:
                         self.extrap_dist_exponent,
                         self.mask_var,
                         self.periodic,
-                        coord_sys=self._coord_sys,
+                        coord_sys=self._coord_sys_str,
                     )
                     futures.append(future)
 
@@ -1087,14 +1080,16 @@ class Regridder:
             - unmapped_mask: Boolean mask (1 for unmapped cells, 0 for mapped).
         """
         if self._weights_matrix is None:
-            raise RuntimeError("Weights have not been generated yet.")
+            if self.parallel and self._dask_futures:
+                self.compute()
+            else:
+                raise RuntimeError("Weights have not been generated yet.")
 
         is_remote = hasattr(self._weights_matrix, "key")
         if is_remote:
             # Distributed lazy diagnostics
             import dask
             import dask.array as da
-            import dask.distributed
 
             if self._total_weights is None:
                 self._total_weights = self._dask_client.submit(
@@ -1173,7 +1168,7 @@ class Regridder:
             If True, skip metrics that require full weight matrix summation
             (expensive for massive grids).
         format : str, default 'dict'
-            The output format: 'dict' or 'dataset'.
+            The output format: 'dict' (eager) or 'dataset' (potentially lazy).
 
         Returns
         -------
@@ -1189,7 +1184,10 @@ class Regridder:
             - n_weights: Total number of non-zero weights.
         """
         if self._weights_matrix is None:
-            raise RuntimeError("Weights have not been generated yet.")
+            if self.parallel and self._dask_futures:
+                self.compute()
+            else:
+                raise RuntimeError("Weights have not been generated yet.")
 
         # Distributed metrics.
         # Compute metrics on the cluster if weights are remote to avoid driver OOM.
@@ -1205,7 +1203,6 @@ class Regridder:
                 try:
                     import dask
                     import dask.array as da
-                    import dask.distributed
 
                     client = self._dask_client or dask.distributed.get_client()
                     n_weights_future = client.submit(
@@ -1251,7 +1248,7 @@ class Regridder:
             weight_sum_mean = weights_sum.mean()
 
             if format == "dict":
-                # Convert to eager values for dict format
+                # Convert to eager values for dict format (may trigger compute)
                 report.update(
                     {
                         "unmapped_count": int(unmapped_count),
@@ -1531,6 +1528,17 @@ class Regridder:
         # Aero Protocol: Weight dispatch is now handled per-variable in _regrid_dataarray
         # to robustly support mixed-backend (NumPy/Dask) Datasets.
 
+        if is_dask(obj) and not self.parallel:
+            # Scientific Hygiene: Warn user if applying regridder to Dask data
+            # but weights were generated in serial (non-Dask) mode.
+            # This is technically supported but suboptimal for performance.
+            import warnings
+
+            warnings.warn(
+                "Applying serial Regridder to Dask-backed data. "
+                "For better performance, initialize Regridder with parallel=True."
+            )
+
         if isinstance(obj, xr.Dataset):
             # Sort input object if source grid was normalized
             if self._src_was_sorted:
@@ -1626,19 +1634,14 @@ class Regridder:
             na_thres = self.na_thres
 
         # Backend-agnostic laziness detection
-        is_cubed = is_cubed_collection(da_in.data)
-
-        is_dask = False
-        if is_dask_collection:
-            is_dask = is_dask_collection(da_in.data) and not is_cubed
-        else:
-            is_dask = hasattr(da_in.data, "dask") and not is_cubed
+        lazy_cubed = is_cubed(da_in)
+        lazy_dask = is_dask(da_in)
 
         # Just-in-Time weight gathering for mixed-backend support.
         # If the input is NOT Dask-backed (e.g., NumPy or Cubed) but weights
         # are still remote Dask Futures, we must gather them to the driver
         # for local application or for passing to the alternative lazy backend.
-        if not is_dask and hasattr(self._weights_matrix, "key"):
+        if not lazy_dask and hasattr(self._weights_matrix, "key"):
             self._weights_matrix = self._dask_client.gather(self._weights_matrix)
             if hasattr(self._total_weights, "key"):
                 self._total_weights = self._dask_client.gather(self._total_weights)
@@ -1766,7 +1769,7 @@ class Regridder:
 
         # Optimization: Use worker-local cache for weights and total_weights to avoid
         # serialization overhead when using Dask.
-        if is_dask:
+        if lazy_dask:
             client = self._dask_client
             if client is None:
                 try:
@@ -1827,11 +1830,13 @@ class Regridder:
         # For Cubed backend, we must ensure core dimensions are not chunked
         # before calling apply_ufunc, because Cubed's apply_gufunc does not
         # support multiple chunks in core dimensions.
-        if is_cubed:
+        if lazy_cubed:
             # Rechunk core dimensions to -1 (single chunk)
             # We use cubed.Array.rechunk directly if possible to avoid Dask conversion
             # if da_in.data is a cubed.Array.
-            if is_cubed_collection(da_in.data):
+            import cubed
+
+            if isinstance(da_in.data, cubed.Array):
                 # Map logical dimensions to numeric axes for rechunking
                 axes_to_rechunk = {}
                 for i, d in enumerate(da_in.dims):
@@ -2009,9 +2014,9 @@ class Regridder:
             except ImportError:
                 esmpy_version = "unknown"
 
-            if is_dask:
+            if lazy_dask:
                 backend = "Distributed (Dask)"
-            elif is_cubed:
+            elif lazy_cubed:
                 backend = "Distributed (Cubed)"
             else:
                 backend = "Eager"
@@ -2059,16 +2064,40 @@ class Regridder:
                 if lon.attrs.get("boundary") == "periodic":
                     return True
 
-                # 2. Check eager values (dimension coordinates are eager in xarray)
-                is_lazy = False
-                if is_dask_collection:
-                    is_lazy = is_dask_collection(lon.data)
-                else:
-                    is_lazy = hasattr(lon.data, "dask")
+                # 2. Check values using lazy-aware discovery
+                lon_min_task, lon_max_task, is_eager = _get_min_max_lazy_aware(lon)
 
-                if not is_lazy:
-                    lon_min = float(lon.min())
-                    lon_max = float(lon.max())
+                if is_eager:
+                    lon_min, lon_max = float(lon_min_task), float(lon_max_task)
+                else:
+                    # Lazy 2D or non-dimension 1D coordinate.
+                    # Aero Protocol: Avoid hidden computes by using the edge-sampling heuristic
+                    # provided by _get_min_max_lazy_aware.
+                    import warnings
+
+                    warnings.warn(
+                        f"Triggering hidden compute in _detect_periodicity for lazy coordinate '{lon.name}'. "
+                        "To avoid this, provide 'periodic' explicitly in Regridder constructor "
+                        "or set the 'boundary' attribute to 'periodic' in your longitude coordinate."
+                    )
+                    try:
+                        # Use xarray's compute to remain backend-agnostic
+                        # if the tasks are xarray/dask objects.
+                        if hasattr(lon_min_task, "compute"):
+                            lon_min = lon_min_task.compute()
+                        else:
+                            lon_min = lon_min_task
+
+                        if hasattr(lon_max_task, "compute"):
+                            lon_max = lon_max_task.compute()
+                        else:
+                            lon_max = lon_max_task
+
+                        lon_min, lon_max = float(lon_min), float(lon_max)
+                    except Exception:
+                        lon_min = lon_max = None
+
+                if lon_min is not None and lon_max is not None:
                     extent = lon_max - lon_min
                     # ESMF periodic grids must have extent strictly less than 360
                     # because the periodicity is handled by connecting the last point to the first.
@@ -2277,20 +2306,12 @@ class Regridder:
             esmpy_version = "unknown"
 
         # For a Dataset, we check if any data variable is lazy
-        is_cubed = any(is_cubed_collection(da.data) for da in ds_in.data_vars.values())
-        is_dask = any(
-            (
-                is_dask_collection(da.data)
-                if is_dask_collection
-                else hasattr(da.data, "dask")
-            )
-            and not is_cubed_collection(da.data)
-            for da in ds_in.data_vars.values()
-        )
+        lazy_cubed = is_cubed(ds_in)
+        lazy_dask = is_dask(ds_in)
 
-        if is_dask:
+        if lazy_dask:
             backend = "Distributed (Dask)"
-        elif is_cubed:
+        elif lazy_cubed:
             backend = "Distributed (Cubed)"
         else:
             backend = "Eager"
