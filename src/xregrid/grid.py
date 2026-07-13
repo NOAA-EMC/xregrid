@@ -177,8 +177,16 @@ def _get_mesh_info(
             # If they share same dim, it's unstructured
             if lat.dims == lon.dims:
                 # Apply filtering before returning
-                lat_isel = {d: 0 for d in non_spatial_dims if d in lat.dims and len(lat.dims) > 1}
-                lon_isel = {d: 0 for d in non_spatial_dims if d in lon.dims and len(lon.dims) > 1}
+                lat_isel = {
+                    d: 0
+                    for d in non_spatial_dims
+                    if d in lat.dims and len(lat.dims) > 1
+                }
+                lon_isel = {
+                    d: 0
+                    for d in non_spatial_dims
+                    if d in lon.dims and len(lon.dims) > 1
+                }
                 if lat_isel:
                     lat = lat.isel(lat_isel, drop=True)
                 if lon_isel:
@@ -899,6 +907,9 @@ def _create_esmf_grid(
         Original cell indices if triangulation was performed.
     """
     import esmpy
+
+    if isinstance(coord_sys, str):
+        coord_sys = get_coord_sys(coord_sys)
 
     non_spatial_dims = _get_non_spatial_dims(ds)
     lon, lat, shape, dims, is_unstructured = _get_mesh_info(
