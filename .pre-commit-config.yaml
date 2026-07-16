@@ -9,6 +9,7 @@ repos:
       - id: check-json
       - id: check-toml
       - id: check-shebang-scripts-are-executable
+        exclude: '\.sl$'  # Slurm job scripts
       - id: check-executables-have-shebangs
       - id: check-symlinks
       - id: check-added-large-files
