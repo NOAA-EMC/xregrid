@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from typing import Any, Optional, Tuple, Union
+from typing import Any
 
 import cf_xarray  # noqa: F401
 import numpy as np
 import xarray as xr
 
-from .utils import _find_coord, is_lazy
 from .constants import get_coord_sys
+from .utils import _find_coord, is_lazy
 
 
-def _get_non_spatial_dims(ds: Union[xr.Dataset, xr.DataArray]) -> set[str]:
+def _get_non_spatial_dims(ds: xr.Dataset | xr.DataArray) -> set[str]:
     """
     Identify dimensions that are likely not spatial (Time, Vertical).
 
@@ -100,9 +100,7 @@ def _get_non_spatial_dims(ds: Union[xr.Dataset, xr.DataArray]) -> set[str]:
     for dim in ds.dims:
         if hasattr(ds, "coords") and dim in ds.coords:
             dtype = ds.coords[dim].dtype
-            if np.issubdtype(dtype, np.datetime64) or np.issubdtype(
-                dtype, np.timedelta64
-            ):
+            if np.issubdtype(dtype, np.datetime64) or np.issubdtype(dtype, np.timedelta64):
                 non_spatial_dims.add(str(dim))
 
     return non_spatial_dims
@@ -110,9 +108,9 @@ def _get_non_spatial_dims(ds: Union[xr.Dataset, xr.DataArray]) -> set[str]:
 
 def _get_mesh_info(
     ds: xr.Dataset,
-    method: Optional[str] = None,
+    method: str | None = None,
     is_source: bool = True,
-) -> Tuple[xr.DataArray, xr.DataArray, Tuple[int, ...], Tuple[str, ...], bool]:
+) -> tuple[xr.DataArray, xr.DataArray, tuple[int, ...], tuple[str, ...], bool]:
     """
     Detect grid type and extract coordinates and shape from a dataset.
 
@@ -143,7 +141,7 @@ def _get_mesh_info(
 
     # Handle uxarray objects
     if hasattr(ds, "uxgrid"):
-        uxgrid = getattr(ds, "uxgrid")
+        uxgrid = ds.uxgrid
         try:
             # Check if data variable is on faces
             use_faces = False
@@ -163,11 +161,7 @@ def _get_mesh_info(
                     if "n_face" in first_var.dims or "nFaces" in first_var.dims:
                         use_faces = True
 
-            if (
-                use_faces
-                and hasattr(uxgrid, "face_lat")
-                and hasattr(uxgrid, "face_lon")
-            ):
+            if use_faces and hasattr(uxgrid, "face_lat") and hasattr(uxgrid, "face_lon"):
                 lat = uxgrid.face_lat
                 lon = uxgrid.face_lon
             else:
@@ -177,16 +171,8 @@ def _get_mesh_info(
             # If they share same dim, it's unstructured
             if lat.dims == lon.dims:
                 # Apply filtering before returning
-                lat_isel = {
-                    d: 0
-                    for d in non_spatial_dims
-                    if d in lat.dims and len(lat.dims) > 1
-                }
-                lon_isel = {
-                    d: 0
-                    for d in non_spatial_dims
-                    if d in lon.dims and len(lon.dims) > 1
-                }
+                lat_isel = {d: 0 for d in non_spatial_dims if d in lat.dims and len(lat.dims) > 1}
+                lon_isel = {d: 0 for d in non_spatial_dims if d in lon.dims and len(lon.dims) > 1}
                 if lat_isel:
                     lat = lat.isel(lat_isel, drop=True)
                 if lon_isel:
@@ -212,10 +198,9 @@ def _get_mesh_info(
         if first_var is not None:
             for c_name in ds.coords:
                 c = ds[c_name]
-                if (
-                    c.attrs.get("standard_name") == "latitude"
-                    or "lat" in c_name.lower()
-                ) and set(c.dims).issubset(set(first_var.dims)):
+                if (c.attrs.get("standard_name") == "latitude" or "lat" in c_name.lower()) and set(c.dims).issubset(
+                    set(first_var.dims)
+                ):
                     lat = c
                     break
 
@@ -312,9 +297,7 @@ def _get_mesh_info(
         is_unstructured_fmt = True
     elif "mesh" in lon.attrs and "location" in lon.attrs:
         is_unstructured_fmt = True
-    elif any(d in lat.dims for d in unstructured_dims) or any(
-        d in ds.dims for d in unstructured_dims
-    ):
+    elif any(d in lat.dims for d in unstructured_dims) or any(d in ds.dims for d in unstructured_dims):
         is_unstructured_fmt = True
     else:
         for var in ds.variables:
@@ -335,19 +318,11 @@ def _get_mesh_info(
                 lon_vals = lon.values
                 # Separable if std-dev along axis of variation is ~0 for the *other* axis.
                 # lat should be constant along dim-1 (columns), lon constant along dim-0 (rows).
-                lat_col_std = float(
-                    _np.nanstd(lat_vals - lat_vals[:, :1], axis=1).max()
-                )
-                lon_row_std = float(
-                    _np.nanstd(lon_vals - lon_vals[:1, :], axis=0).max()
-                )
+                lat_col_std = float(_np.nanstd(lat_vals - lat_vals[:, :1], axis=1).max())
+                lon_row_std = float(_np.nanstd(lon_vals - lon_vals[:1, :], axis=0).max())
                 if lat_col_std < 1e-6 and lon_row_std < 1e-6:
-                    lat_1d = xr.DataArray(
-                        lat_vals[:, 0], dims=[lat.dims[0]], attrs=lat.attrs
-                    )
-                    lon_1d = xr.DataArray(
-                        lon_vals[0, :], dims=[lon.dims[1]], attrs=lon.attrs
-                    )
+                    lat_1d = xr.DataArray(lat_vals[:, 0], dims=[lat.dims[0]], attrs=lat.attrs)
+                    lon_1d = xr.DataArray(lon_vals[0, :], dims=[lon.dims[1]], attrs=lon.attrs)
                     lon_mesh, lat_mesh = xr.broadcast(lon_1d, lat_1d)
                     lon_mesh = lon_mesh.transpose(lat_1d.dims[0], lon_1d.dims[0])
                     lat_mesh = lat_mesh.transpose(lat_1d.dims[0], lon_1d.dims[0])
@@ -402,7 +377,7 @@ def _get_mesh_info(
         raise ValueError("Latitude and longitude must be 1D or 2D.")
 
 
-def _bounds_to_vertices(b: xr.DataArray) -> Union[xr.DataArray, np.ndarray]:
+def _bounds_to_vertices(b: xr.DataArray) -> xr.DataArray | np.ndarray:
     """
     Convert cell boundary coordinates (bounds) to vertex coordinates for ESMF.
 
@@ -431,22 +406,14 @@ def _bounds_to_vertices(b: xr.DataArray) -> Union[xr.DataArray, np.ndarray]:
     elif b.ndim == 3 and b.shape[-1] == 4:
         # 2D curvilinear bounds (Y, X, 4) -> (Y+1, X+1) vertices
         v0 = b.isel({b.dims[-1]: 0})  # (y, x)
-        v1_last_col = b.isel({b.dims[-1]: 1}).isel(
-            {b.dims[1]: slice(-1, None)}
-        )  # (y, 1)
+        v1_last_col = b.isel({b.dims[-1]: 1}).isel({b.dims[1]: slice(-1, None)})  # (y, 1)
 
         row_block = xr.concat([v0, v1_last_col], dim=b.dims[1])  # (y, x+1)
 
-        v3_last_row = b.isel({b.dims[-1]: 3}).isel(
-            {b.dims[0]: slice(-1, None)}
-        )  # (1, x)
-        v2_last_corner = b.isel({b.dims[-1]: 2}).isel(
-            {b.dims[0]: slice(-1, None), b.dims[1]: slice(-1, None)}
-        )  # (1, 1)
+        v3_last_row = b.isel({b.dims[-1]: 3}).isel({b.dims[0]: slice(-1, None)})  # (1, x)
+        v2_last_corner = b.isel({b.dims[-1]: 2}).isel({b.dims[0]: slice(-1, None), b.dims[1]: slice(-1, None)})  # (1, 1)
 
-        last_row_block = xr.concat(
-            [v3_last_row, v2_last_corner], dim=b.dims[1]
-        )  # (1, x+1)
+        last_row_block = xr.concat([v3_last_row, v2_last_corner], dim=b.dims[1])  # (1, x+1)
 
         return xr.concat([row_block, last_row_block], dim=b.dims[0])  # (y+1, x+1)
 
@@ -455,9 +422,7 @@ def _bounds_to_vertices(b: xr.DataArray) -> Union[xr.DataArray, np.ndarray]:
 
 def _get_grid_bounds(
     ds: xr.Dataset,
-) -> Tuple[
-    Optional[Union[xr.DataArray, np.ndarray]], Optional[Union[xr.DataArray, np.ndarray]]
-]:
+) -> tuple[xr.DataArray | np.ndarray | None, xr.DataArray | np.ndarray | None]:
     """
     Extract grid cell boundaries from a dataset using cf-xarray or standard names.
 
@@ -554,13 +519,13 @@ def _get_unstructured_mesh_info(
     ds: xr.Dataset,
     method: str = "conservative",
     is_source: bool = True,
-) -> Tuple[
+) -> tuple[
     np.ndarray,  # node_lon
     np.ndarray,  # node_lat
     np.ndarray,  # element_conn
     np.ndarray,  # element_types
     np.ndarray,  # element_ids
-    Optional[np.ndarray],  # orig_cell_index
+    np.ndarray | None,  # orig_cell_index
 ]:
     """
     Extract unstructured mesh connectivity and vertex info for ESMF Mesh.
@@ -597,15 +562,13 @@ def _get_unstructured_mesh_info(
 
     # 0. Detect uxarray
     if hasattr(ds, "uxgrid"):
-        uxgrid = getattr(ds, "uxgrid")
+        uxgrid = ds.uxgrid
         try:
             node_lat = _clip_latitudes(_to_degrees(uxgrid.node_lat)).values
             node_lon = _normalize_longitudes(_to_degrees(uxgrid.node_lon)).values
             conn_raw = uxgrid.face_node_connectivity.values
             start_index = uxgrid.face_node_connectivity.attrs.get("start_index", 0)
-            fill_value = uxgrid.face_node_connectivity.attrs.get(
-                "_FillValue", -9223372036854775808
-            )
+            fill_value = uxgrid.face_node_connectivity.attrs.get("_FillValue", -9223372036854775808)
 
             # Vectorized triangulation
             n_cells, max_edges = conn_raw.shape
@@ -656,11 +619,7 @@ def _get_unstructured_mesh_info(
         node_lat = _clip_latitudes(_to_degrees(v_lat)).values
         node_lon = _normalize_longitudes(_to_degrees(v_lon)).values
         conn_raw = v_conn.values
-        n_edges = (
-            ds["nEdgesOnCell"].values
-            if "nEdgesOnCell" in ds
-            else np.full(ds.sizes["nCells"], conn_raw.shape[1])
-        )
+        n_edges = ds["nEdgesOnCell"].values if "nEdgesOnCell" in ds else np.full(ds.sizes["nCells"], conn_raw.shape[1])
 
         n_cells, max_edges = conn_raw.shape
         max_tris = max_edges - 2
@@ -809,9 +768,7 @@ def _get_unstructured_mesh_info(
 
         coords = np.column_stack([flat_lon, flat_lat])
         coords_rounded = np.round(coords, 8)
-        _, unique_indices, inverse_indices = np.unique(
-            coords_rounded, axis=0, return_index=True, return_inverse=True
-        )
+        _, unique_indices, inverse_indices = np.unique(coords_rounded, axis=0, return_index=True, return_inverse=True)
 
         node_lon = flat_lon[unique_indices]
         node_lat = flat_lat[unique_indices]
@@ -839,9 +796,7 @@ def _get_unstructured_mesh_info(
         )
 
     # 4. Fallback for LocStreams
-    if method in ["nearest_s2d", "nearest_d2s"] or (
-        method in ["bilinear", "patch"] and not is_source
-    ):
+    if method in ["nearest_s2d", "nearest_d2s"] or (method in ["bilinear", "patch"] and not is_source):
         v_lat = _find_coord(ds, "latitude")
         v_lon = _find_coord(ds, "longitude")
 
@@ -866,19 +821,17 @@ def _get_unstructured_mesh_info(
                     None,
                 )
 
-    raise ValueError(
-        f"Could not find unstructured mesh connectivity (MPAS or UGRID) for {method} regridding."
-    )
+    raise ValueError(f"Could not find unstructured mesh connectivity (MPAS or UGRID) for {method} regridding.")
 
 
 def _create_esmf_grid(
     ds: xr.Dataset,
     method: str,
     periodic: bool = False,
-    mask_var: Optional[str] = None,
+    mask_var: str | None = None,
     coord_sys: Any = None,
     is_source: bool = True,
-) -> Tuple[Any, list[str], Optional[np.ndarray]]:
+) -> tuple[Any, list[str], np.ndarray | None]:
     """
     Create an ESMF Grid or LocStream from an xarray Dataset.
 
@@ -912,9 +865,7 @@ def _create_esmf_grid(
         coord_sys = get_coord_sys(coord_sys)
 
     non_spatial_dims = _get_non_spatial_dims(ds)
-    lon, lat, shape, dims, is_unstructured = _get_mesh_info(
-        ds, method=method, is_source=is_source
-    )
+    lon, lat, shape, dims, is_unstructured = _get_mesh_info(ds, method=method, is_source=is_source)
     provenance = []
     orig_idx = None
 
@@ -941,9 +892,7 @@ def _create_esmf_grid(
 
                 if len(element_ids) > 0:
                     if "lat_b" in ds and "lon_b" in ds and ds["lat_b"].ndim == 2:
-                        provenance.append(
-                            "Derived unstructured mesh connectivity from SCRIP-style bounds."
-                        )
+                        provenance.append("Derived unstructured mesh connectivity from SCRIP-style bounds.")
 
                     mesh = esmpy.Mesh(
                         parametric_dim=2,
@@ -967,9 +916,7 @@ def _create_esmf_grid(
                     if mask_var and mask_var in ds:
                         if method == "conservative":
                             v_mask = ds[mask_var]
-                            mask_isel = {
-                                d: 0 for d in non_spatial_dims if d in v_mask.dims
-                            }
+                            mask_isel = {d: 0 for d in non_spatial_dims if d in v_mask.dims}
                             if mask_isel:
                                 v_mask = v_mask.isel(mask_isel, drop=True)
                             mask_val = v_mask.values
@@ -994,24 +941,14 @@ def _create_esmf_grid(
                     raise
 
         if method not in ["nearest_s2d", "nearest_d2s"] and is_source:
-            raise NotImplementedError(
-                f"Method '{method}' requires connectivity information for unstructured grids. "
-            )
+            raise NotImplementedError(f"Method '{method}' requires connectivity information for unstructured grids. ")
         locstream = esmpy.LocStream(shape[0], coord_sys=coord_sys)
         if coord_sys == get_coord_sys("CART"):
-            locstream["ESMF:X"] = _normalize_longitudes(_to_degrees(lon)).values.astype(
-                np.float64
-            )
-            locstream["ESMF:Y"] = _clip_latitudes(_to_degrees(lat)).values.astype(
-                np.float64
-            )
+            locstream["ESMF:X"] = _normalize_longitudes(_to_degrees(lon)).values.astype(np.float64)
+            locstream["ESMF:Y"] = _clip_latitudes(_to_degrees(lat)).values.astype(np.float64)
         else:
-            locstream["ESMF:Lon"] = _normalize_longitudes(
-                _to_degrees(lon)
-            ).values.astype(np.float64)
-            locstream["ESMF:Lat"] = _clip_latitudes(_to_degrees(lat)).values.astype(
-                np.float64
-            )
+            locstream["ESMF:Lon"] = _normalize_longitudes(_to_degrees(lon)).values.astype(np.float64)
+            locstream["ESMF:Lat"] = _clip_latitudes(_to_degrees(lat)).values.astype(np.float64)
 
         if mask_var and mask_var in ds:
             v_mask = ds[mask_var]
@@ -1031,9 +968,7 @@ def _create_esmf_grid(
         # periodic and cause GridCreate1PeriDim failures.
         if periodic and shape_f[0] < 2:
             periodic = False
-            provenance.append(
-                "Disabled periodic handling for degenerate grid (periodic dimension < 2 cells)."
-            )
+            provenance.append("Disabled periodic handling for degenerate grid (periodic dimension < 2 cells).")
 
         num_peri_dims = 1 if periodic else None
         periodic_dim = 0 if periodic else None
@@ -1046,17 +981,13 @@ def _create_esmf_grid(
                 ds_with_bounds = ds.cf.add_bounds(["latitude", "longitude"])
                 lat_b, lon_b = _get_grid_bounds(ds_with_bounds)
                 if lat_b is not None and lon_b is not None:
-                    provenance.append(
-                        f"Automatically generated cell boundaries for {method} regridding."
-                    )
+                    provenance.append(f"Automatically generated cell boundaries for {method} regridding.")
             except Exception:
                 pass
 
         has_bounds = lat_b is not None and lon_b is not None
         if method == "conservative" and not has_bounds:
-            raise ValueError(
-                "Conservative regridding requires cell boundaries (bounds)."
-            )
+            raise ValueError("Conservative regridding requires cell boundaries (bounds).")
 
         staggerlocs = [esmpy.StaggerLoc.CENTER]
         if has_bounds:
@@ -1074,12 +1005,8 @@ def _create_esmf_grid(
             pole_dim=pole_dim,
         )
 
-        grid.get_coords(0, staggerloc=esmpy.StaggerLoc.CENTER)[...] = lon_f.astype(
-            np.float64
-        )
-        grid.get_coords(1, staggerloc=esmpy.StaggerLoc.CENTER)[...] = lat_f.astype(
-            np.float64
-        )
+        grid.get_coords(0, staggerloc=esmpy.StaggerLoc.CENTER)[...] = lon_f.astype(np.float64)
+        grid.get_coords(1, staggerloc=esmpy.StaggerLoc.CENTER)[...] = lat_f.astype(np.float64)
 
         if has_bounds:
             if lon_b.ndim == 1 and lat_b.ndim == 1:
@@ -1103,12 +1030,8 @@ def _create_esmf_grid(
                 lon_b_vals_f = lon_b_vals_f[:-1, :]
                 lat_b_vals_f = lat_b_vals_f[:-1, :]
 
-            grid.get_coords(0, staggerloc=esmpy.StaggerLoc.CORNER)[...] = (
-                lon_b_vals_f.astype(np.float64)
-            )
-            grid.get_coords(1, staggerloc=esmpy.StaggerLoc.CORNER)[...] = (
-                lat_b_vals_f.astype(np.float64)
-            )
+            grid.get_coords(0, staggerloc=esmpy.StaggerLoc.CORNER)[...] = lon_b_vals_f.astype(np.float64)
+            grid.get_coords(1, staggerloc=esmpy.StaggerLoc.CORNER)[...] = lat_b_vals_f.astype(np.float64)
 
         if mask_var and mask_var in ds:
             v_mask = ds[mask_var]
@@ -1117,7 +1040,5 @@ def _create_esmf_grid(
                 v_mask = v_mask.isel(mask_isel, drop=True)
 
             grid.add_item(esmpy.GridItem.MASK, staggerloc=esmpy.StaggerLoc.CENTER)
-            grid.get_item(esmpy.GridItem.MASK, staggerloc=esmpy.StaggerLoc.CENTER)[
-                ...
-            ] = v_mask.values.T.astype(np.int32)
+            grid.get_item(esmpy.GridItem.MASK, staggerloc=esmpy.StaggerLoc.CENTER)[...] = v_mask.values.T.astype(np.int32)
         return grid, provenance, None

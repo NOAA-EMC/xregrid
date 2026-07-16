@@ -13,9 +13,10 @@ Key concepts demonstrated:
 - Handling global periodicity
 """
 
-import xarray as xr
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import xarray as xr
+
 from xregrid import Regridder
 
 # Load tutorial dataset (global, 0.75° resolution)

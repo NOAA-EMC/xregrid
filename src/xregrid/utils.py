@@ -4,7 +4,7 @@ import datetime
 import os
 import socket
 import warnings
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any
 
 import numpy as np
 
@@ -129,9 +129,7 @@ def _get_array_namespace(*objs: Any) -> Any:
     return np
 
 
-def _lazy_arange(
-    start: float, stop: float, step: float, chunks: Optional[int] = None
-) -> Any:
+def _lazy_arange(start: float, stop: float, step: float, chunks: int | None = None) -> Any:
     """
     Create a lazy or eager range.
 
@@ -163,12 +161,12 @@ def _lazy_arange(
 
 
 def _create_rectilinear_grid(
-    lat_range: Tuple[float, float],
-    lon_range: Tuple[float, float],
+    lat_range: tuple[float, float],
+    lon_range: tuple[float, float],
     res_lat: float,
     res_lon: float,
     add_bounds: bool = True,
-    chunks: Optional[Union[int, Dict[str, int]]] = None,
+    chunks: int | dict[str, int] | None = None,
     history_msg: str = "",
     crs: str = "EPSG:4326",
 ) -> xr.Dataset:
@@ -202,12 +200,8 @@ def _create_rectilinear_grid(
     lat_chunks = chunks.get("lat", -1) if isinstance(chunks, dict) else chunks
     lon_chunks = chunks.get("lon", -1) if isinstance(chunks, dict) else chunks
 
-    lat_arr = _lazy_arange(
-        lat_range[0] + res_lat / 2, lat_range[1], res_lat, chunks=lat_chunks
-    )
-    lon_arr = _lazy_arange(
-        lon_range[0] + res_lon / 2, lon_range[1], res_lon, chunks=lon_chunks
-    )
+    lat_arr = _lazy_arange(lat_range[0] + res_lat / 2, lat_range[1], res_lat, chunks=lat_chunks)
+    lon_arr = _lazy_arange(lon_range[0] + res_lon / 2, lon_range[1], res_lon, chunks=lon_chunks)
 
     ds = xr.Dataset(
         coords={
@@ -227,12 +221,8 @@ def _create_rectilinear_grid(
     if add_bounds:
         # Use CF-compliant (N, 2) bounds.
         # Ensure identical length handling for lazy/eager
-        lat_b_1d = _lazy_arange(
-            lat_range[0], lat_range[1] + res_lat, res_lat, chunks=lat_chunks
-        )[: lat_arr.size + 1]
-        lon_b_1d = _lazy_arange(
-            lon_range[0], lon_range[1] + res_lon, res_lon, chunks=lon_chunks
-        )[: lon_arr.size + 1]
+        lat_b_1d = _lazy_arange(lat_range[0], lat_range[1] + res_lat, res_lat, chunks=lat_chunks)[: lat_arr.size + 1]
+        lon_b_1d = _lazy_arange(lon_range[0], lon_range[1] + res_lon, res_lon, chunks=lon_chunks)[: lon_arr.size + 1]
 
         xp = _get_array_namespace(lat_b_1d, lon_b_1d)
         lat_b_2d = xp.stack([lat_b_1d[:-1], lat_b_1d[1:]], axis=1)
@@ -266,7 +256,7 @@ def create_global_grid(
     res_lat: float,
     res_lon: float,
     add_bounds: bool = True,
-    chunks: Optional[Union[int, Dict[str, int]]] = None,
+    chunks: int | dict[str, int] | None = None,
 ) -> xr.Dataset:
     """
     Create a global rectilinear grid dataset.
@@ -300,12 +290,12 @@ def create_global_grid(
 
 
 def create_regional_grid(
-    lat_range: Tuple[float, float],
-    lon_range: Tuple[float, float],
+    lat_range: tuple[float, float],
+    lon_range: tuple[float, float],
     res_lat: float,
     res_lon: float,
     add_bounds: bool = True,
-    chunks: Optional[Union[int, Dict[str, int]]] = None,
+    chunks: int | dict[str, int] | None = None,
 ) -> xr.Dataset:
     """
     Create a regional rectilinear grid dataset.
@@ -402,7 +392,7 @@ def load_esmf_file(filepath: str) -> xr.Dataset:
     return ds
 
 
-def get_crs_info(obj: Union[xr.DataArray, xr.Dataset]) -> Optional[Any]:
+def get_crs_info(obj: xr.DataArray | xr.Dataset) -> Any | None:
     """
     Detect CRS information from an xarray object's attributes or encoding.
 
@@ -423,12 +413,7 @@ def get_crs_info(obj: Union[xr.DataArray, xr.Dataset]) -> Optional[Any]:
 
     # Try to detect CRS from attributes and encoding
     # We prioritize 'grid_mapping' then 'crs'
-    crs_info = (
-        obj.attrs.get("grid_mapping")
-        or obj.encoding.get("grid_mapping")
-        or obj.attrs.get("crs")
-        or obj.encoding.get("crs")
-    )
+    crs_info = obj.attrs.get("grid_mapping") or obj.encoding.get("grid_mapping") or obj.attrs.get("crs") or obj.encoding.get("crs")
 
     # Try cf-xarray for robust grid mapping discovery
     if crs_info is None or isinstance(crs_info, str):
@@ -446,11 +431,7 @@ def get_crs_info(obj: Union[xr.DataArray, xr.Dataset]) -> Optional[Any]:
                     gm_var = gms[0].array if hasattr(gms[0], "array") else gms[0]
 
             if gm_var is not None:
-                crs_info = (
-                    gm_var.attrs.get("crs_wkt")
-                    or gm_var.attrs.get("spatial_ref")
-                    or gm_var.attrs.get("grid_mapping_name")
-                )
+                crs_info = gm_var.attrs.get("crs_wkt") or gm_var.attrs.get("spatial_ref") or gm_var.attrs.get("grid_mapping_name")
         except (AttributeError, KeyError, ImportError):
             pass
 
@@ -463,9 +444,7 @@ def get_crs_info(obj: Union[xr.DataArray, xr.Dataset]) -> Optional[Any]:
     return None
 
 
-def _find_coord(
-    obj: Union[xr.DataArray, xr.Dataset], key: str
-) -> Optional[xr.DataArray]:
+def _find_coord(obj: xr.DataArray | xr.Dataset, key: str) -> xr.DataArray | None:
     """
     Find a coordinate in an xarray object by CF standard name or common name.
 
@@ -502,7 +481,7 @@ def _find_coord(
                         if set(obj[m].dims).issubset(set(obj.dims)):
                             return obj[m]
                 elif isinstance(obj, xr.Dataset) and len(obj.data_vars) > 0:
-                    for name, da in obj.data_vars.items():
+                    for _name, da in obj.data_vars.items():
                         if da.attrs.get("cf_role") not in [
                             "mesh_topology",
                             "face_node_connectivity",
@@ -561,9 +540,7 @@ def _find_coord(
     return None
 
 
-def update_history(
-    obj: Union[xr.DataArray, xr.Dataset], message: str
-) -> Union[xr.DataArray, xr.Dataset]:
+def update_history(obj: xr.DataArray | xr.Dataset, message: str) -> xr.DataArray | xr.Dataset:
     """
     Update the 'history' attribute of an xarray object with a timestamped message.
 
@@ -590,7 +567,7 @@ def update_history(
 
 def _transform_coords(
     x_arr: np.ndarray, y_arr: np.ndarray, crs_in: Any, crs_out: str = "EPSG:4326"
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Transform coordinates using pyproj.
 
@@ -621,11 +598,11 @@ def _transform_coords(
 
 
 def create_grid_from_crs(
-    crs: Union[str, int, Any],
-    extent: Tuple[float, float, float, float],
-    res: Union[float, Tuple[float, float]],
+    crs: str | int | Any,
+    extent: tuple[float, float, float, float],
+    res: float | tuple[float, float],
     add_bounds: bool = True,
-    chunks: Optional[Union[int, Dict[str, int]]] = None,
+    chunks: int | dict[str, int] | None = None,
 ) -> xr.Dataset:
     """
     Create a structured grid dataset from a CRS and extent.
@@ -757,12 +734,8 @@ def create_grid_from_crs(
         y_da_1d = xr.DataArray(y, dims=["y"])
 
         # Create (N, 2) bounds
-        x_b_1d = xr.concat(
-            [x_da_1d - res_x / 2, x_da_1d + res_x / 2], dim="nbounds"
-        ).transpose("x", "nbounds")
-        y_b_1d = xr.concat(
-            [y_da_1d - res_y / 2, y_da_1d + res_y / 2], dim="nbounds"
-        ).transpose("y", "nbounds")
+        x_b_1d = xr.concat([x_da_1d - res_x / 2, x_da_1d + res_x / 2], dim="nbounds").transpose("x", "nbounds")
+        y_b_1d = xr.concat([y_da_1d - res_y / 2, y_da_1d + res_y / 2], dim="nbounds").transpose("y", "nbounds")
 
         ds.coords["x_b"] = (["x", "nbounds"], x_b_1d.data, {"units": units})
         ds.coords["y_b"] = (["y", "nbounds"], y_b_1d.data, {"units": units})
@@ -775,18 +748,16 @@ def create_grid_from_crs(
 
     # Add extra metadata about the generated bounds if present
     bounds_msg = " with cell bounds" if add_bounds else ""
-    update_history(
-        ds, f"Created grid from CRS {crs} using xregrid ({backend}){bounds_msg}."
-    )
+    update_history(ds, f"Created grid from CRS {crs} using xregrid ({backend}){bounds_msg}.")
     if chunks is not None:
         ds = ds.chunk(chunks)
     return ds
 
 
 def create_grid_from_ioapi(
-    metadata: Dict[str, Any],
+    metadata: dict[str, Any],
     add_bounds: bool = True,
-    chunks: Optional[Union[int, Dict[str, int]]] = None,
+    chunks: int | dict[str, int] | None = None,
 ) -> xr.Dataset:
     """
     Create a structured grid dataset from IOAPI-compliant metadata.
@@ -834,49 +805,25 @@ def create_grid_from_ioapi(
     if gdtyp == 1:  # Lat-Lon
         crs = "EPSG:4326"
     elif gdtyp == 2:  # Lambert Conformal
-        crs = (
-            f"+proj=lcc +lat_1={p_alp} +lat_2={p_bet} +lat_0={ycent} "
-            f"+lon_0={xcent} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
-        )
+        crs = f"+proj=lcc +lat_1={p_alp} +lat_2={p_bet} +lat_0={ycent} +lon_0={xcent} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
     elif gdtyp == 3:  # Mercator
-        crs = (
-            f"+proj=merc +lat_ts={p_alp} +lon_0={xcent} +lat_0={ycent} "
-            f"+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
-        )
+        crs = f"+proj=merc +lat_ts={p_alp} +lon_0={xcent} +lat_0={ycent} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
     elif gdtyp == 4:  # Stereographic
-        crs = (
-            f"+proj=stere +lat_ts={p_alp} +lat_0={ycent} +lon_0={xcent} "
-            f"+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
-        )
+        crs = f"+proj=stere +lat_ts={p_alp} +lat_0={ycent} +lon_0={xcent} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
     elif gdtyp == 5:  # UTM
         crs = f"+proj=utm +zone={int(p_alp)} +datum=WGS84 +units=m +no_defs"
     elif gdtyp == 6:  # Polar Stereographic
         # lat_0 determined by p_alp (1.0 for North, -1.0 for South)
         lat_0 = 90.0 if p_alp > 0 else -90.0
-        crs = (
-            f"+proj=stere +lat_0={lat_0} +lat_ts={p_bet} +lon_0={xcent} "
-            f"+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
-        )
+        crs = f"+proj=stere +lat_0={lat_0} +lat_ts={p_bet} +lon_0={xcent} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
     elif gdtyp == 7:  # Equatorial Mercator
-        crs = (
-            f"+proj=merc +lat_ts={p_alp} +lon_0={xcent} +lat_0=0 "
-            f"+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
-        )
+        crs = f"+proj=merc +lat_ts={p_alp} +lon_0={xcent} +lat_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
     elif gdtyp == 8:  # Transverse Mercator
-        crs = (
-            f"+proj=tmerc +lat_0={ycent} +k={p_bet} +lon_0={xcent} "
-            f"+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
-        )
+        crs = f"+proj=tmerc +lat_0={ycent} +k={p_bet} +lon_0={xcent} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
     elif gdtyp == 9:  # Albers Equal Area
-        crs = (
-            f"+proj=aea +lat_1={p_alp} +lat_2={p_bet} +lat_0={ycent} "
-            f"+lon_0={xcent} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
-        )
+        crs = f"+proj=aea +lat_1={p_alp} +lat_2={p_bet} +lat_0={ycent} +lon_0={xcent} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
     elif gdtyp == 10:  # Lambert Azimuthal Equal Area
-        crs = (
-            f"+proj=laea +lat_0={ycent} +lon_0={xcent} "
-            f"+x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
-        )
+        crs = f"+proj=laea +lat_0={ycent} +lon_0={xcent} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
     elif gdtyp == 13:  # Sinusoidal
         crs = f"+proj=sinu +lon_0={xcent} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
     else:
@@ -897,14 +844,14 @@ def create_grid_from_ioapi(
 
 
 def create_lcc_grid(
-    extent: Tuple[float, float, float, float],
-    res: Union[float, Tuple[float, float]],
+    extent: tuple[float, float, float, float],
+    res: float | tuple[float, float],
     lat_1: float,
     lat_2: float,
     lat_0: float,
     lon_0: float,
     add_bounds: bool = True,
-    chunks: Optional[Union[int, Dict[str, int]]] = None,
+    chunks: int | dict[str, int] | None = None,
 ) -> xr.Dataset:
     """
     Create a structured grid dataset with a Lambert Conformal Conic (LCC) projection.
@@ -935,10 +882,7 @@ def create_lcc_grid(
     xr.Dataset
         The grid dataset containing 'lat', 'lon' and projected coordinates 'x', 'y'.
     """
-    crs = (
-        f"+proj=lcc +lat_1={lat_1} +lat_2={lat_2} +lat_0={lat_0} "
-        f"+lon_0={lon_0} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
-    )
+    crs = f"+proj=lcc +lat_1={lat_1} +lat_2={lat_2} +lat_0={lat_0} +lon_0={lon_0} +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
     ds = create_grid_from_crs(crs, extent, res, add_bounds=add_bounds, chunks=chunks)
 
     # Backend detection for provenance
@@ -953,12 +897,12 @@ def create_lcc_grid(
 
 
 def create_sinusoidal_grid(
-    extent: Tuple[float, float, float, float],
-    res: Union[float, Tuple[float, float], str],
+    extent: tuple[float, float, float, float],
+    res: float | tuple[float, float] | str,
     lon_0: float = 0.0,
     radius: float = 6371007.181,
     add_bounds: bool = True,
-    chunks: Optional[Union[int, Dict[str, int]]] = None,
+    chunks: int | dict[str, int] | None = None,
 ) -> xr.Dataset:
     """
     Create a structured grid dataset with a Sinusoidal projection.
@@ -1002,20 +946,18 @@ def create_sinusoidal_grid(
 
     crs = f"+proj=sinu +lon_0={lon_0} +x_0=0 +y_0=0 +R={radius} +units=m +no_defs"
     ds = create_grid_from_crs(crs, extent, res, add_bounds=add_bounds, chunks=chunks)
-    update_history(
-        ds, f"Created Sinusoidal grid (lon_0={lon_0}, R={radius}) using xregrid."
-    )
+    update_history(ds, f"Created Sinusoidal grid (lon_0={lon_0}, R={radius}) using xregrid.")
     return ds
 
 
 def create_rotated_latlon_grid(
-    extent: Tuple[float, float, float, float],
-    res: Union[float, Tuple[float, float]],
+    extent: tuple[float, float, float, float],
+    res: float | tuple[float, float],
     grid_north_pole_lat: float,
     grid_north_pole_lon: float,
     north_pole_grid_lon: float = 0.0,
     add_bounds: bool = True,
-    chunks: Optional[Union[int, Dict[str, int]]] = None,
+    chunks: int | dict[str, int] | None = None,
 ) -> xr.Dataset:
     """
     Create a structured grid dataset with a Rotated Pole (Rotated Lat-Lon) projection.
@@ -1068,9 +1010,7 @@ def create_rotated_latlon_grid(
             core_chunks["y"] = core_chunks.pop("rlat")
 
     # Use core implementation
-    ds = create_grid_from_crs(
-        crs_obj, extent, res, add_bounds=add_bounds, chunks=core_chunks
-    )
+    ds = create_grid_from_crs(crs_obj, extent, res, add_bounds=add_bounds, chunks=core_chunks)
 
     # Rename coordinates to standard rotated pole names (rlat, rlon)
     ds = ds.rename({"y": "rlat", "x": "rlon"})
@@ -1130,7 +1070,7 @@ def create_rotated_latlon_grid(
     return ds
 
 
-def _get_min_max_lazy_aware(da_coord: xr.DataArray) -> Tuple[Any, Any, bool]:
+def _get_min_max_lazy_aware(da_coord: xr.DataArray) -> tuple[Any, Any, bool]:
     """
     Helper to get min/max from a coordinate DataArray efficiently.
 
@@ -1157,11 +1097,7 @@ def _get_min_max_lazy_aware(da_coord: xr.DataArray) -> Tuple[Any, Any, bool]:
         return float(da_coord.min()), float(da_coord.max()), True
 
     # 2. Check if it's a dimension coordinate in indexes
-    if (
-        da_coord.ndim == 1
-        and da_coord.name in da_coord.dims
-        and da_coord.name in da_coord.indexes
-    ):
+    if da_coord.ndim == 1 and da_coord.name in da_coord.dims and da_coord.name in da_coord.indexes:
         idx = da_coord.indexes[da_coord.name]
         return float(idx.min()), float(idx.max()), True
 
@@ -1184,12 +1120,12 @@ def _get_min_max_lazy_aware(da_coord: xr.DataArray) -> Tuple[Any, Any, bool]:
 
 
 def create_grid_like(
-    obj: Union[xr.DataArray, xr.Dataset],
-    res: Union[float, Tuple[float, float]],
+    obj: xr.DataArray | xr.Dataset,
+    res: float | tuple[float, float],
     add_bounds: bool = True,
-    chunks: Optional[Union[int, Dict[str, int]]] = None,
-    extent: Optional[Tuple[float, float, float, float]] = None,
-    crs: Optional[Union[str, int, Any]] = None,
+    chunks: int | dict[str, int] | None = None,
+    extent: tuple[float, float, float, float] | None = None,
+    crs: str | int | Any | None = None,
 ) -> xr.Dataset:
     """
     Create a new grid dataset with the same extent and CRS as an existing object.
@@ -1239,9 +1175,7 @@ def create_grid_like(
         history_msg_base += f"\nTemplate history:\n{obj.attrs['history']}"
 
     if extent is not None:
-        if crs_obj is None or (
-            hasattr(crs_obj, "is_geographic") and crs_obj.is_geographic
-        ):
+        if crs_obj is None or (hasattr(crs_obj, "is_geographic") and crs_obj.is_geographic):
             # Lat-Lon
             return _create_rectilinear_grid(
                 (extent[2], extent[3]),  # lat_range
@@ -1255,9 +1189,7 @@ def create_grid_like(
             )
         else:
             # Projected
-            return create_grid_from_crs(
-                crs_obj, extent, (res_x, res_y), add_bounds=add_bounds, chunks=chunks
-            )
+            return create_grid_from_crs(crs_obj, extent, (res_x, res_y), add_bounds=add_bounds, chunks=chunks)
 
     # Aero Optimization: Try to find extent in metadata before falling back to compute.
     if extent is None:
@@ -1277,9 +1209,7 @@ def create_grid_like(
             pass
 
     if extent is not None:
-        if crs_obj is None or (
-            hasattr(crs_obj, "is_geographic") and crs_obj.is_geographic
-        ):
+        if crs_obj is None or (hasattr(crs_obj, "is_geographic") and crs_obj.is_geographic):
             # Lat-Lon
             return _create_rectilinear_grid(
                 (extent[2], extent[3]),  # lat_range
@@ -1293,9 +1223,7 @@ def create_grid_like(
             )
         else:
             # Projected
-            return create_grid_from_crs(
-                crs_obj, extent, (res_x, res_y), add_bounds=add_bounds, chunks=chunks
-            )
+            return create_grid_from_crs(crs_obj, extent, (res_x, res_y), add_bounds=add_bounds, chunks=chunks)
 
     # Discovery logic: we need min/max. We use batch compute if lazy to minimize roundtrips.
     # Aero-Optimization: Use Xarray indexes for 1D dimension coordinates to avoid hidden computes.
@@ -1368,9 +1296,7 @@ def create_grid_like(
                 y_max_val = float(results.get("y_max", y_max))
 
                 res_x_orig = float(results.get("res_x", 0))
-                res_y_orig = float(
-                    results.get("res_y", res_x_orig if res_x_orig else 0)
-                )
+                res_y_orig = float(results.get("res_y", res_x_orig if res_x_orig else 0))
 
                 extent = (
                     x_min_val - res_x_orig / 2,
@@ -1382,14 +1308,8 @@ def create_grid_like(
                 x_min_val, x_max_val = float(x_min), float(x_max)
                 y_min_val, y_max_val = float(y_min), float(y_max)
 
-                res_x_orig = (
-                    abs(float(x_da.diff(x_da.dims[0]).mean())) if x_da.size > 1 else 0
-                )
-                res_y_orig = (
-                    abs(float(y_da.diff(y_da.dims[0]).mean()))
-                    if y_da.size > 1
-                    else res_x_orig
-                )
+                res_x_orig = abs(float(x_da.diff(x_da.dims[0]).mean())) if x_da.size > 1 else 0
+                res_y_orig = abs(float(y_da.diff(y_da.dims[0]).mean())) if y_da.size > 1 else res_x_orig
                 extent = (
                     x_min_val - res_x_orig / 2,
                     x_max_val + res_x_orig / 2,
@@ -1401,9 +1321,7 @@ def create_grid_like(
             # Fallback to generic geographic if no CRS found
             crs_obj = "EPSG:4326"
 
-        return create_grid_from_crs(
-            crs_obj, extent, (res_x, res_y), add_bounds=add_bounds, chunks=chunks
-        )
+        return create_grid_from_crs(crs_obj, extent, (res_x, res_y), add_bounds=add_bounds, chunks=chunks)
 
     except (KeyError, AttributeError, ValueError):
         pass
@@ -1479,9 +1397,7 @@ def create_grid_like(
                 lon_max_val = float(results.get("lon_max", lon_max))
 
                 res_lat_orig = float(results.get("res_lat", 0))
-                res_lon_orig = float(
-                    results.get("res_lon", res_lat_orig if res_lat_orig else 0)
-                )
+                res_lon_orig = float(results.get("res_lon", res_lat_orig if res_lat_orig else 0))
 
                 lat_range = (
                     lat_min_val - res_lat_orig / 2,
@@ -1495,16 +1411,8 @@ def create_grid_like(
                 lat_min_val, lat_max_val = float(lat_min), float(lat_max)
                 lon_min_val, lon_max_val = float(lon_min), float(lon_max)
 
-                res_lat_orig = (
-                    abs(float(lat_da.diff(lat_da.dims[0]).mean()))
-                    if lat_da.size > 1
-                    else 0
-                )
-                res_lon_orig = (
-                    abs(float(lon_da.diff(lon_da.dims[-1]).mean()))
-                    if lon_da.size > 1
-                    else res_lat_orig
-                )
+                res_lat_orig = abs(float(lat_da.diff(lat_da.dims[0]).mean())) if lat_da.size > 1 else 0
+                res_lon_orig = abs(float(lon_da.diff(lon_da.dims[-1]).mean())) if lon_da.size > 1 else res_lat_orig
                 lat_range = (
                     lat_min_val - res_lat_orig / 2,
                     lat_max_val + res_lat_orig / 2,
@@ -1524,18 +1432,15 @@ def create_grid_like(
             crs=crs_obj.to_wkt() if crs_obj else "EPSG:4326",
             history_msg=history_msg_base,
         )
-    except (KeyError, AttributeError, ValueError):
-        raise ValueError(
-            "Could not detect spatial coordinates (latitude/longitude or "
-            "projection_x/y) in input object."
-        )
+    except (KeyError, AttributeError, ValueError) as err:
+        raise ValueError("Could not detect spatial coordinates (latitude/longitude or projection_x/y) in input object.") from err
 
 
 def create_mesh_from_coords(
-    x: Union[np.ndarray, xr.DataArray],
-    y: Union[np.ndarray, xr.DataArray],
-    crs: Union[str, int, Any],
-    chunks: Optional[Union[int, Dict[str, int]]] = None,
+    x: np.ndarray | xr.DataArray,
+    y: np.ndarray | xr.DataArray,
+    crs: str | int | Any,
+    chunks: int | dict[str, int] | None = None,
 ) -> xr.Dataset:
     """
     Create an unstructured mesh dataset from coordinates and a CRS.
@@ -1558,10 +1463,7 @@ def create_mesh_from_coords(
         The mesh dataset containing 'lat', 'lon' and 'x', 'y' as 1D arrays.
     """
     if pyproj is None:
-        raise ImportError(
-            "pyproj is required for create_mesh_from_coords. "
-            "Install it with `pip install pyproj`."
-        )
+        raise ImportError("pyproj is required for create_mesh_from_coords. Install it with `pip install pyproj`.")
     crs_obj = pyproj.CRS(crs)
 
     # Force n_pts dimension to avoid alignment/broadcasting issues in apply_ufunc
@@ -1676,8 +1578,8 @@ def create_mesh_from_coords(
 
 
 def get_rdhpcs_cluster(
-    machine: Optional[str] = None,
-    account: Optional[str] = None,
+    machine: str | None = None,
+    account: str | None = None,
     **kwargs: Any,
 ) -> Any:
     """
@@ -1703,11 +1605,8 @@ def get_rdhpcs_cluster(
     """
     try:
         from dask_jobqueue import SLURMCluster
-    except ImportError:
-        raise ImportError(
-            "dask-jobqueue is required for get_rdhpcs_cluster. "
-            "Install it with `pip install dask-jobqueue`."
-        )
+    except ImportError as err:
+        raise ImportError("dask-jobqueue is required for get_rdhpcs_cluster. Install it with `pip install dask-jobqueue`.") from err
 
     hostname = socket.gethostname()
     if machine is None:
@@ -1722,8 +1621,7 @@ def get_rdhpcs_cluster(
             machine = "gaea-c5"
         else:
             raise ValueError(
-                f"Could not detect NOAA RDHPCS machine from hostname '{hostname}'. "
-                "Please specify 'machine' explicitly."
+                f"Could not detect NOAA RDHPCS machine from hostname '{hostname}'. Please specify 'machine' explicitly."
             )
 
     defaults = {
@@ -1779,19 +1677,17 @@ def get_rdhpcs_cluster(
     if defaults["account"] is None:
         import warnings
 
-        warnings.warn(
-            "No SLURM account specified. Please provide 'account' or set SACCOUNT environment variable."
-        )
+        warnings.warn("No SLURM account specified. Please provide 'account' or set SACCOUNT environment variable.")
 
     return SLURMCluster(**defaults)
 
 
 def spatial_slice(
-    obj: Union[xr.DataArray, xr.Dataset],
-    extent: Tuple[float, float, float, float],
-    crs: Optional[Union[str, int, Any]] = None,
+    obj: xr.DataArray | xr.Dataset,
+    extent: tuple[float, float, float, float],
+    crs: str | int | Any | None = None,
     buffer: float = 0.0,
-) -> Union[xr.DataArray, xr.Dataset]:
+) -> xr.DataArray | xr.Dataset:
     """
     Slice an xarray object to a spatial extent, handling longitude wrapping.
 
@@ -1829,11 +1725,10 @@ def spatial_slice(
             x_da = obj.cf["projection_x_coordinate"]
             y_da = obj.cf["projection_y_coordinate"]
             is_geographic = False
-        except (KeyError, AttributeError):
+        except (KeyError, AttributeError) as err:
             raise ValueError(
-                "Could not detect spatial coordinates (lat/lon or x/y) for slicing. "
-                "Ensure your data has CF-compliant coordinates."
-            )
+                "Could not detect spatial coordinates (lat/lon or x/y) for slicing. Ensure your data has CF-compliant coordinates."
+            ) from err
     else:
         x_da, y_da = lon_da, lat_da
         is_geographic = True
@@ -1841,10 +1736,7 @@ def spatial_slice(
     # 2. CRS Transformation
     if crs is not None:
         if pyproj is None:
-            raise ImportError(
-                "pyproj is required for CRS-aware slicing. "
-                "Install it with `pip install pyproj`."
-            )
+            raise ImportError("pyproj is required for CRS-aware slicing. Install it with `pip install pyproj`.")
         target_crs = get_crs_info(obj) or pyproj.CRS("EPSG:4326")
         transformer = pyproj.Transformer.from_crs(crs, target_crs, always_xy=True)
 
@@ -1985,7 +1877,7 @@ def unstructured_to_scrip(ds: xr.Dataset) -> xr.Dataset:
             orig_cell_index,
         ) = _get_unstructured_mesh_info(ds, method="conservative")
     except Exception as e:
-        raise ValueError(f"Failed to extract unstructured connectivity: {e}")
+        raise ValueError(f"Failed to extract unstructured connectivity: {e}") from e
 
     # 3. Reshape connectivity to SCRIP-style (N, 3 for triangles)
     # _get_unstructured_mesh_info always triangulates.
@@ -2018,16 +1910,12 @@ def unstructured_to_scrip(ds: xr.Dataset) -> xr.Dataset:
         coords={
             "lat": (
                 ["grid_size"],
-                lat_c.data[orig_cell_index]
-                if orig_cell_index is not None
-                else lat_c.data,
+                lat_c.data[orig_cell_index] if orig_cell_index is not None else lat_c.data,
                 lat_attrs,
             ),
             "lon": (
                 ["grid_size"],
-                lon_c.data[orig_cell_index]
-                if orig_cell_index is not None
-                else lon_c.data,
+                lon_c.data[orig_cell_index] if orig_cell_index is not None else lon_c.data,
                 lon_attrs,
             ),
             "lat_b": (

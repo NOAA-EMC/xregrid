@@ -4,6 +4,7 @@ import dask.array as da
 import numpy as np
 import pytest
 import xarray as xr
+
 from xregrid.regridder import Regridder
 
 
@@ -180,9 +181,7 @@ def test_unstructured_conservative_weight_scaling():
     res_lazy = regridder(da_src_lazy)
     assert isinstance(res_lazy.data, da.Array)
     if is_mock:
-        np.testing.assert_allclose(
-            res_lazy.compute().values, [0.5, 0.0, 0.0, 0.0], rtol=1e-5
-        )
+        np.testing.assert_allclose(res_lazy.compute().values, [0.5, 0.0, 0.0, 0.0], rtol=1e-5)
     else:
         np.testing.assert_allclose(res_lazy.compute().values, np.ones(4), rtol=1e-5)
 
@@ -193,28 +192,18 @@ def test_unstructured_conservative_weight_scaling():
     if is_mock:
         import dask.distributed
 
-        cluster = dask.distributed.LocalCluster(
-            n_workers=1, threads_per_worker=1, processes=False
-        )
+        cluster = dask.distributed.LocalCluster(n_workers=1, threads_per_worker=1, processes=False)
         client = dask.distributed.Client(cluster)
         try:
-            regridder_parallel = Regridder(
-                ds_src, ds_tgt, method="conservative", parallel=True
-            )
+            regridder_parallel = Regridder(ds_src, ds_tgt, method="conservative", parallel=True)
             res_parallel = regridder_parallel(da_src_lazy)
             assert isinstance(res_parallel.data, da.Array)
             # Under mock ESMF with n_workers=1, 2 chunks are created (size 2 each).
             # Each chunk gets its own mock weight of 1.0, scaled to 0.5,
             # so cell 0 and cell 2 get weight 0.5.
-            np.testing.assert_allclose(
-                res_parallel.compute().values, [0.5, 0.0, 0.5, 0.0], rtol=1e-5
-            )
-            weights_sum_parallel = np.array(
-                regridder_parallel.weights.sum(axis=1)
-            ).flatten()
-            np.testing.assert_allclose(
-                weights_sum_parallel, [0.5, 0.0, 0.5, 0.0], rtol=1e-5
-            )
+            np.testing.assert_allclose(res_parallel.compute().values, [0.5, 0.0, 0.5, 0.0], rtol=1e-5)
+            weights_sum_parallel = np.array(regridder_parallel.weights.sum(axis=1)).flatten()
+            np.testing.assert_allclose(weights_sum_parallel, [0.5, 0.0, 0.5, 0.0], rtol=1e-5)
         finally:
             client.close()
             cluster.close()

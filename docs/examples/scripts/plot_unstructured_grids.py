@@ -13,9 +13,10 @@ Key concepts:
 - Nearest neighbor interpolation methods
 """
 
-import xarray as xr
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import xarray as xr
+
 from xregrid import Regridder
 
 # 1. Create a synthetic unstructured grid

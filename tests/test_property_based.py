@@ -3,27 +3,28 @@ from __future__ import annotations
 import os
 import uuid
 import warnings
+
 import numpy as np
 import xarray as xr
-from typing import Tuple
-from hypothesis import given, strategies as st, settings, HealthCheck, assume
+from hypothesis import HealthCheck, assume, given, settings
+from hypothesis import strategies as st
 
 from xregrid import (
     Regridder,
     create_global_grid,
-    create_regional_grid,
     create_grid_from_crs,
+    create_grid_from_ioapi,
     create_grid_like,
+    create_regional_grid,
     create_rotated_latlon_grid,
     create_sinusoidal_grid,
-    create_grid_from_ioapi,
 )
 from xregrid.utils import (
     _get_min_max_lazy_aware,
-    is_lazy,
-    is_dask,
-    spatial_slice,
     create_lcc_grid,
+    is_dask,
+    is_lazy,
+    spatial_slice,
 )
 
 # Configure hypothesis to have higher deadlines since ESMF is involved
@@ -37,9 +38,7 @@ settings.load_profile("default")
     add_bounds=st.booleans(),
 )
 @settings(suppress_health_check=[HealthCheck.filter_too_much], max_examples=15)
-def test_create_global_grid_properties(
-    res_lat: float, res_lon: float, add_bounds: bool
-) -> None:
+def test_create_global_grid_properties(res_lat: float, res_lon: float, add_bounds: bool) -> None:
     """
     Test properties of create_global_grid using Hypothesis.
 
@@ -58,9 +57,7 @@ def test_create_global_grid_properties(
         Whether to add cell boundaries.
     """
     # Create eager grid
-    ds_eager = create_global_grid(
-        res_lat=res_lat, res_lon=res_lon, add_bounds=add_bounds
-    )
+    ds_eager = create_global_grid(res_lat=res_lat, res_lon=res_lon, add_bounds=add_bounds)
 
     assert "lat" in ds_eager.coords
     assert "lon" in ds_eager.coords
@@ -84,9 +81,7 @@ def test_create_global_grid_properties(
         assert ds_eager.lon_b.shape == (lon.size, 2)
 
     # Test eager vs lazy parity
-    ds_lazy = create_global_grid(
-        res_lat=res_lat, res_lon=res_lon, add_bounds=add_bounds, chunks=5
-    )
+    ds_lazy = create_global_grid(res_lat=res_lat, res_lon=res_lon, add_bounds=add_bounds, chunks=5)
 
     if add_bounds:
         # Bounds are 2D and not dimension coordinates, so they remain lazy
@@ -253,9 +248,7 @@ def test_get_min_max_lazy_aware_properties(ndim: int, size_y: int, size_x: int) 
         assert np.isclose(min_v, -20.0)
         assert np.isclose(max_v, 20.0)
 
-        da_lazy = xr.DataArray(
-            da.from_array(x, chunks=(3, 3)), dims=("y", "x"), name="lon"
-        )
+        da_lazy = xr.DataArray(da.from_array(x, chunks=(3, 3)), dims=("y", "x"), name="lon")
         min_v2, max_v2, is_eager2 = _get_min_max_lazy_aware(da_lazy)
         assert not is_eager2
         assert np.isclose(float(min_v2.compute()), -20.0)
@@ -269,9 +262,7 @@ def test_get_min_max_lazy_aware_properties(ndim: int, size_y: int, size_x: int) 
     skipna=st.booleans(),
     has_time=st.booleans(),
 )
-@settings(
-    max_examples=10, suppress_health_check=[HealthCheck.filter_too_much], deadline=None
-)
+@settings(max_examples=10, suppress_health_check=[HealthCheck.filter_too_much], deadline=None)
 def test_regridder_real_esmf_properties(
     res_src: float,
     res_tgt: float,
@@ -354,11 +345,7 @@ def test_regridder_real_esmf_properties(
             # Eager application
             res_eager = regridder(da_src)
 
-            expected_shape = (
-                (2, ds_tgt.lat.size, ds_tgt.lon.size)
-                if has_time
-                else (ds_tgt.lat.size, ds_tgt.lon.size)
-            )
+            expected_shape = (2, ds_tgt.lat.size, ds_tgt.lon.size) if has_time else (ds_tgt.lat.size, ds_tgt.lon.size)
             assert res_eager.shape == expected_shape
             assert "lat" in res_eager.dims
             assert "lon" in res_eager.dims
@@ -380,9 +367,7 @@ def test_regridder_real_esmf_properties(
             res_lazy_computed = res_lazy.compute()
 
             # Parity check
-            np.testing.assert_allclose(
-                res_eager.values, res_lazy_computed.values, equal_nan=True
-            )
+            np.testing.assert_allclose(res_eager.values, res_lazy_computed.values, equal_nan=True)
 
             # History check
             assert "history" in res_eager.attrs
@@ -403,9 +388,7 @@ def test_regridder_real_esmf_properties(
     add_bounds=st.booleans(),
 )
 @settings(max_examples=10, suppress_health_check=[HealthCheck.filter_too_much])
-def test_create_rotated_latlon_grid_properties(
-    pole_lat: float, pole_lon: float, res: float, add_bounds: bool
-) -> None:
+def test_create_rotated_latlon_grid_properties(pole_lat: float, pole_lon: float, res: float, add_bounds: bool) -> None:
     """
     Test properties of create_rotated_latlon_grid using Hypothesis.
 
@@ -413,9 +396,7 @@ def test_create_rotated_latlon_grid_properties(
     geographic coordinates lat/lon are computed and eager/lazy parity is preserved.
     """
     extent = (-20.0, 20.0, -15.0, 15.0)
-    ds_eager = create_rotated_latlon_grid(
-        extent, res, pole_lat, pole_lon, add_bounds=add_bounds
-    )
+    ds_eager = create_rotated_latlon_grid(extent, res, pole_lat, pole_lon, add_bounds=add_bounds)
 
     assert "rlat" in ds_eager.coords
     assert "rlon" in ds_eager.coords
@@ -433,9 +414,7 @@ def test_create_rotated_latlon_grid_properties(
         assert "lon_b" in ds_eager.coords
 
     # Lazy parity check
-    ds_lazy = create_rotated_latlon_grid(
-        extent, res, pole_lat, pole_lon, add_bounds=add_bounds, chunks=5
-    )
+    ds_lazy = create_rotated_latlon_grid(extent, res, pole_lat, pole_lon, add_bounds=add_bounds, chunks=5)
 
     assert is_lazy(ds_lazy.lat)
     xr.testing.assert_allclose(ds_eager, ds_lazy.compute())
@@ -483,9 +462,7 @@ def test_create_sinusoidal_grid_properties(res_alias: str, add_bounds: bool) -> 
     add_bounds=st.booleans(),
 )
 @settings(max_examples=10, suppress_health_check=[HealthCheck.filter_too_much])
-def test_create_lcc_grid_properties(
-    lat_1: float, lat_2: float, lat_0: float, lon_0: float, add_bounds: bool
-) -> None:
+def test_create_lcc_grid_properties(lat_1: float, lat_2: float, lat_0: float, lon_0: float, add_bounds: bool) -> None:
     """
     Test properties of Lambert Conformal Conic grid helper using Hypothesis.
     """
@@ -495,9 +472,7 @@ def test_create_lcc_grid_properties(
     extent = (-100000.0, 100000.0, -100000.0, 100000.0)
     res = 50000.0
 
-    ds_eager = create_lcc_grid(
-        extent, res, lat_1, lat_2, lat_0, lon_0, add_bounds=add_bounds
-    )
+    ds_eager = create_lcc_grid(extent, res, lat_1, lat_2, lat_0, lon_0, add_bounds=add_bounds)
 
     assert "x" in ds_eager.coords
     assert "y" in ds_eager.coords
@@ -509,9 +484,7 @@ def test_create_lcc_grid_properties(
         assert "y_b" in ds_eager.coords
 
     # Lazy parity
-    ds_lazy = create_lcc_grid(
-        extent, res, lat_1, lat_2, lat_0, lon_0, add_bounds=add_bounds, chunks=5
-    )
+    ds_lazy = create_lcc_grid(extent, res, lat_1, lat_2, lat_0, lon_0, add_bounds=add_bounds, chunks=5)
     assert is_lazy(ds_lazy.lat)
     xr.testing.assert_allclose(ds_eager, ds_lazy.compute())
 
@@ -523,9 +496,7 @@ def test_create_lcc_grid_properties(
     add_bounds=st.booleans(),
 )
 @settings(max_examples=10, suppress_health_check=[HealthCheck.filter_too_much])
-def test_create_grid_from_ioapi_properties(
-    gdtyp: int, ncols: int, nrows: int, add_bounds: bool
-) -> None:
+def test_create_grid_from_ioapi_properties(gdtyp: int, ncols: int, nrows: int, add_bounds: bool) -> None:
     """
     Test properties of create_grid_from_ioapi using Hypothesis.
 
@@ -575,7 +546,7 @@ def test_create_grid_from_ioapi_properties(
 )
 @settings(max_examples=10, suppress_health_check=[HealthCheck.filter_too_much])
 def test_spatial_slice_wrapping_properties(
-    extent: Tuple[float, float, float, float],
+    extent: tuple[float, float, float, float],
     buffer: float,
     is_lazy_data: bool,
 ) -> None:
@@ -678,12 +649,8 @@ def test_regrid_unstructured_to_unstructured_properties(
     Test properties of unstructured to unstructured regridding.
     """
     # Create source and target unstructured meshes
-    ds_src = generate_unstructured_polygon_mesh(
-        n_cells_src, n_corners, center_lon_start=0.5, step_lon=1.0
-    )
-    ds_tgt = generate_unstructured_polygon_mesh(
-        n_cells_tgt, n_corners, center_lon_start=0.5, step_lon=1.0
-    )
+    ds_src = generate_unstructured_polygon_mesh(n_cells_src, n_corners, center_lon_start=0.5, step_lon=1.0)
+    ds_tgt = generate_unstructured_polygon_mesh(n_cells_tgt, n_corners, center_lon_start=0.5, step_lon=1.0)
 
     # Input constant field of ones
     data = np.ones(n_cells_src)
@@ -721,9 +688,7 @@ def test_regrid_unstructured_to_unstructured_properties(
 
             # All points overlap in identical span, so bilinear/nearest on constant should return 1.0 (or close)
             # where overlap is successful.
-            np.testing.assert_allclose(
-                res_comp.values, np.ones(n_cells_tgt), rtol=1e-3, atol=1e-3
-            )
+            np.testing.assert_allclose(res_comp.values, np.ones(n_cells_tgt), rtol=1e-3, atol=1e-3)
     finally:
         if os.path.exists(weights_file):
             try:
@@ -748,9 +713,7 @@ def test_regrid_unstructured_to_rectilinear_properties(
     """
     Test properties of unstructured to rectilinear regridding.
     """
-    ds_src = generate_unstructured_polygon_mesh(
-        n_cells, n_corners, center_lon_start=15.0, step_lon=25.0
-    )
+    ds_src = generate_unstructured_polygon_mesh(n_cells, n_corners, center_lon_start=15.0, step_lon=25.0)
     ds_tgt = create_global_grid(res_lat=res_tgt, res_lon=res_tgt, add_bounds=True)
 
     da_src = xr.DataArray(
@@ -785,9 +748,7 @@ def test_regrid_unstructured_to_rectilinear_properties(
             else:
                 res_comp = res
 
-            np.testing.assert_allclose(
-                res_comp.values, np.full(res_comp.shape, 10.0), rtol=1e-3, atol=1e-3
-            )
+            np.testing.assert_allclose(res_comp.values, np.full(res_comp.shape, 10.0), rtol=1e-3, atol=1e-3)
     finally:
         if os.path.exists(weights_file):
             try:
@@ -811,16 +772,12 @@ def test_regrid_unstructured_to_lcc_properties(
     Test properties of unstructured to projected (LCC) regridding.
     """
     # Create unstructured mesh in geographic coordinates
-    ds_src = generate_unstructured_polygon_mesh(
-        n_cells, n_corners, center_lon_start=-97.0, step_lon=0.5
-    )
+    ds_src = generate_unstructured_polygon_mesh(n_cells, n_corners, center_lon_start=-97.0, step_lon=0.5)
 
     # Create LCC target grid
     extent = (-100000.0, 100000.0, -100000.0, 100000.0)
     res = 50000.0
-    ds_tgt = create_lcc_grid(
-        extent, res, lat_1=30.0, lat_2=60.0, lat_0=40.0, lon_0=-97.0, add_bounds=True
-    )
+    ds_tgt = create_lcc_grid(extent, res, lat_1=30.0, lat_2=60.0, lat_0=40.0, lon_0=-97.0, add_bounds=True)
 
     da_src = xr.DataArray(
         np.full(n_cells, 20.0),
@@ -854,9 +811,7 @@ def test_regrid_unstructured_to_lcc_properties(
             else:
                 res_comp = res
 
-            np.testing.assert_allclose(
-                res_comp.values, np.full(res_comp.shape, 20.0), rtol=1e-3, atol=1e-3
-            )
+            np.testing.assert_allclose(res_comp.values, np.full(res_comp.shape, 20.0), rtol=1e-3, atol=1e-3)
     finally:
         if os.path.exists(weights_file):
             try:
@@ -882,9 +837,7 @@ def test_regrid_rectilinear_to_unstructured_properties(
     Test properties of rectilinear to unstructured regridding.
     """
     ds_src = create_global_grid(res_lat=res_src, res_lon=res_src, add_bounds=True)
-    ds_tgt = generate_unstructured_polygon_mesh(
-        n_cells, n_corners, center_lon_start=15.0, step_lon=25.0
-    )
+    ds_tgt = generate_unstructured_polygon_mesh(n_cells, n_corners, center_lon_start=15.0, step_lon=25.0)
 
     da_src = xr.DataArray(
         np.full((ds_src.lat.size, ds_src.lon.size), 30.0),
@@ -917,9 +870,7 @@ def test_regrid_rectilinear_to_unstructured_properties(
             else:
                 res_comp = res
 
-            np.testing.assert_allclose(
-                res_comp.values, np.full(n_cells, 30.0), rtol=1e-3, atol=1e-3
-            )
+            np.testing.assert_allclose(res_comp.values, np.full(n_cells, 30.0), rtol=1e-3, atol=1e-3)
     finally:
         if os.path.exists(weights_file):
             try:
@@ -944,13 +895,9 @@ def test_regrid_lcc_to_unstructured_properties(
     """
     extent = (-100000.0, 100000.0, -100000.0, 100000.0)
     res = 50000.0
-    ds_src = create_lcc_grid(
-        extent, res, lat_1=30.0, lat_2=60.0, lat_0=40.0, lon_0=-97.0, add_bounds=True
-    )
+    ds_src = create_lcc_grid(extent, res, lat_1=30.0, lat_2=60.0, lat_0=40.0, lon_0=-97.0, add_bounds=True)
 
-    ds_tgt = generate_unstructured_polygon_mesh(
-        n_cells, n_corners, center_lon_start=-97.0, step_lon=0.5
-    )
+    ds_tgt = generate_unstructured_polygon_mesh(n_cells, n_corners, center_lon_start=-97.0, step_lon=0.5)
 
     da_src = xr.DataArray(
         np.full((ds_src.y.size, ds_src.x.size), 40.0),
@@ -983,9 +930,7 @@ def test_regrid_lcc_to_unstructured_properties(
             else:
                 res_comp = res
 
-            np.testing.assert_allclose(
-                res_comp.values, np.full(n_cells, 40.0), rtol=1e-3, atol=1e-3
-            )
+            np.testing.assert_allclose(res_comp.values, np.full(n_cells, 40.0), rtol=1e-3, atol=1e-3)
     finally:
         if os.path.exists(weights_file):
             try:
@@ -1002,9 +947,7 @@ def test_regrid_lcc_to_unstructured_properties(
     buffer=st.floats(min_value=0.0, max_value=2.0),
 )
 @settings(max_examples=10, suppress_health_check=[HealthCheck.filter_too_much])
-def test_spatial_slice_properties(
-    min_x: float, max_x: float, min_y: float, max_y: float, buffer: float
-) -> None:
+def test_spatial_slice_properties(min_x: float, max_x: float, min_y: float, max_y: float, buffer: float) -> None:
     """
     Test properties of spatial_slice using Hypothesis.
 
@@ -1059,12 +1002,8 @@ def test_spatial_slice_properties(
     res=st.floats(min_value=20000, max_value=100000),
     add_bounds=st.booleans(),
 )
-@settings(
-    max_examples=10, suppress_health_check=[HealthCheck.filter_too_much], deadline=None
-)
-def test_create_grid_from_crs_properties(
-    crs_code: int, extent_offset_x: float, res: float, add_bounds: bool
-) -> None:
+@settings(max_examples=10, suppress_health_check=[HealthCheck.filter_too_much], deadline=None)
+def test_create_grid_from_crs_properties(crs_code: int, extent_offset_x: float, res: float, add_bounds: bool) -> None:
     """
     Test properties of create_grid_from_crs using Hypothesis.
 
@@ -1104,9 +1043,7 @@ def test_create_grid_from_crs_properties(
     assert "y" in ds_eager.coords
 
     # Parity check with Dask using appropriate chunks
-    ds_lazy = create_grid_from_crs(
-        crs, extent, res, add_bounds=add_bounds, chunks=min(num_x, num_y, 5)
-    )
+    ds_lazy = create_grid_from_crs(crs, extent, res, add_bounds=add_bounds, chunks=min(num_x, num_y, 5))
     assert is_lazy(ds_lazy.lat)
     xr.testing.assert_allclose(ds_eager, ds_lazy.compute())
 
@@ -1118,9 +1055,7 @@ def test_create_grid_from_crs_properties(
     add_bounds=st.booleans(),
 )
 @settings(max_examples=10, suppress_health_check=[HealthCheck.filter_too_much])
-def test_create_grid_like_properties(
-    res_lat: float, res_lon: float, new_res: float, add_bounds: bool
-) -> None:
+def test_create_grid_like_properties(res_lat: float, res_lon: float, new_res: float, add_bounds: bool) -> None:
     """
     Test properties of create_grid_like using Hypothesis.
 
@@ -1163,9 +1098,7 @@ def test_create_grid_like_properties(
     # or just suppress/ignore warning to verify it triggers and functions correctly.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=UserWarning)
-        ds_new_lazy = create_grid_like(
-            ds_template_lazy, new_res, add_bounds=add_bounds, chunks=2
-        )
+        ds_new_lazy = create_grid_like(ds_template_lazy, new_res, add_bounds=add_bounds, chunks=2)
 
     assert is_lazy(ds_new_lazy.lat_b) if add_bounds else True
     xr.testing.assert_allclose(ds_new_eager, ds_new_lazy.compute())
@@ -1177,9 +1110,7 @@ def test_create_grid_like_properties(
     method=st.sampled_from(["bilinear", "nearest_s2d", "conservative", "patch"]),
     constant_val=st.floats(min_value=-100.0, max_value=100.0),
 )
-@settings(
-    max_examples=8, suppress_health_check=[HealthCheck.filter_too_much], deadline=None
-)
+@settings(max_examples=8, suppress_health_check=[HealthCheck.filter_too_much], deadline=None)
 def test_regridder_constant_preservation(
     res_src: float,
     res_tgt: float,
@@ -1243,9 +1174,7 @@ def test_regridder_constant_preservation(
     res_src=st.floats(min_value=15.0, max_value=45.0),
     res_tgt=st.floats(min_value=15.0, max_value=45.0),
 )
-@settings(
-    max_examples=8, suppress_health_check=[HealthCheck.filter_too_much], deadline=None
-)
+@settings(max_examples=8, suppress_health_check=[HealthCheck.filter_too_much], deadline=None)
 def test_regridder_conservative_conservation(
     res_src: float,
     res_tgt: float,

@@ -36,9 +36,7 @@ def generate_mock_weights(n_src, n_dst, weights_per_row=4):
     return csr_matrix((data, (row, col)), shape=(n_dst, n_src))
 
 
-def benchmark_apply(
-    res_name, n_lat, n_lon, target_n_lat, target_n_lon, n_time=1, skipna=False
-):
+def benchmark_apply(res_name, n_lat, n_lon, target_n_lat, target_n_lon, n_time=1, skipna=False):
     n_src = n_lat * n_lon
     n_dst = target_n_lat * target_n_lon
 
@@ -99,9 +97,7 @@ def benchmark_stationary_mask(n_lat, n_lon, n_time=10):
 
     # Time with skipna=True
     start = time.perf_counter()
-    _ = _apply_weights_core(
-        data, weights_key, ("lat", "lon"), (n_lat, n_lon), skipna=True
-    )
+    _ = _apply_weights_core(data, weights_key, ("lat", "lon"), (n_lat, n_lon), skipna=True)
     end = time.perf_counter()
 
     total_time = end - start
@@ -126,7 +122,7 @@ print("\n## Multi-Time Step Performance (Stationary Mask Caching)")
 print("| Time Steps | Resolution | Avg Time per Step |")
 print("|------------|------------|-------------------|")
 for n_t in [1, 10, 100]:
-    for name, ny, nx, tny, tnx in [
+    for name, ny, nx, _tny, _tnx in [
         ("1.0°", 180, 360, 180, 360),
         ("0.25°", 720, 1440, 720, 1440),
     ]:

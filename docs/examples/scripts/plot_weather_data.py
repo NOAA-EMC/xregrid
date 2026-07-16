@@ -7,10 +7,11 @@ documentation and shows how to regrid station-like data (points) to a
 regular 2D grid.
 """
 
-import xarray as xr
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+import xarray as xr
+
 from xregrid import Regridder
 
 # 1. Create toy weather data (similar to xarray docs)
@@ -59,9 +60,7 @@ ds_regridded = regridder(ds)
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
 # Plot stations as points
-sc = ax1.scatter(
-    ds.lon, ds.lat, c=ds.tmax.isel(time=0), s=200, cmap="viridis", edgecolor="k"
-)
+sc = ax1.scatter(ds.lon, ds.lat, c=ds.tmax.isel(time=0), s=200, cmap="viridis", edgecolor="k")
 plt.colorbar(sc, ax=ax1, label="Temperature")
 ax1.set_title("Station Data (tmax, day 0)")
 ax1.set_xlabel("Longitude")

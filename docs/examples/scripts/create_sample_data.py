@@ -8,6 +8,7 @@ sine-cosine wave pattern.
 """
 
 import numpy as np
+
 from xregrid.utils import create_global_grid
 
 
@@ -18,9 +19,7 @@ def create_sample_data():
     # Add some dummy data
     lat = ds.lat.values
     lon = ds.lon.values
-    data = (
-        np.sin(np.deg2rad(lat))[:, np.newaxis] * np.cos(np.deg2rad(lon))[np.newaxis, :]
-    )
+    data = np.sin(np.deg2rad(lat))[:, np.newaxis] * np.cos(np.deg2rad(lon))[np.newaxis, :]
 
     ds["sample_var"] = (["lat", "lon"], data)
     ds["sample_var"].attrs["units"] = "dimensionless"

@@ -11,9 +11,9 @@ Key concepts demonstrated:
 - Passing Regridder parameters through the accessor
 """
 
-import xarray as xr
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import xarray as xr
 
 # Load air_temperature tutorial dataset
 ds = xr.tutorial.open_dataset("air_temperature").isel(time=0)

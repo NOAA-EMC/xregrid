@@ -12,9 +12,10 @@ Key concepts demonstrated:
 - Regridding 3D datasets (time, lat, lon)
 """
 
-import xarray as xr
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import xarray as xr
+
 from xregrid import Regridder
 
 # Load air_temperature tutorial dataset (North America, 2.5° resolution)

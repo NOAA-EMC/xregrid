@@ -9,6 +9,7 @@ the "streaking" artifacts often seen in Euclidean interpolations.
 
 import numpy as np
 import xarray as xr
+
 from xregrid import Regridder
 from xregrid.utils import create_global_grid
 
@@ -55,9 +56,7 @@ def run_example():
 
     print("Regridding complete.")
     print(f"Output Variables: {list(ds_regrid.data_vars)}")
-    print(
-        f"Source Longitude Range: {ds_src.lon.min().values:.1f} to {ds_src.lon.max().values:.1f}"
-    )
+    print(f"Source Longitude Range: {ds_src.lon.min().values:.1f} to {ds_src.lon.max().values:.1f}")
     print("Coordinates crossing the dateline are handled correctly by using SPH_DEG.")
 
     # In a real environment with matplotlib:

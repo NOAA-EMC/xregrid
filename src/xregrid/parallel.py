@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-from typing import Any, Optional, Tuple, Union
+from typing import Any
 
 import numpy as np
 import xarray as xr
 
+from xregrid.constants import get_extrap_method_map, get_regrid_method_map
 from xregrid.core import _WORKER_CACHE, _setup_worker_cache
-from xregrid.constants import get_regrid_method_map, get_extrap_method_map
 from xregrid.grid import _create_esmf_grid
 
 
 def _assemble_weights_task(
-    results: list[Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[str]]],
+    results: list[tuple[np.ndarray, np.ndarray, np.ndarray, str | None]],
     n_src: int,
     n_dst: int,
 ) -> Any:
@@ -123,9 +123,7 @@ def _populate_cache_task(value: Any, key: str) -> None:
     _setup_worker_cache(key, value)
 
 
-def _sync_cache_from_worker_data(
-    future_key: str, cache_key: str, dask_worker: Any = None
-) -> None:
+def _sync_cache_from_worker_data(future_key: str, cache_key: str, dask_worker: Any = None) -> None:
     """
     Internal worker task to sync worker-local cache from Dask worker data.
 
@@ -159,13 +157,13 @@ def _compute_chunk_weights(
     source_ds: xr.Dataset,
     chunk_ds: xr.Dataset,
     method: str,
-    dest_slice_info: Union[np.ndarray, Tuple[int, int, int, int, int]],
-    extrap_method: Optional[str] = None,
+    dest_slice_info: np.ndarray | tuple[int, int, int, int, int],
+    extrap_method: str | None = None,
     extrap_dist_exponent: float = 2.0,
-    mask_var: Optional[str] = None,
+    mask_var: str | None = None,
     periodic: bool = False,
     coord_sys: Any = None,
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, Optional[str]]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, str | None]:
     """
     Worker function to compute weights for a specific chunk of the target grid.
 
@@ -216,30 +214,18 @@ def _compute_chunk_weights(
         if src_cache_key in _WORKER_CACHE:
             src_field, src_orig_idx = _WORKER_CACHE[src_cache_key]
         else:
-            src_obj, _, src_orig_idx = _create_esmf_grid(
-                source_ds, method, periodic, mask_var, coord_sys=coord_sys
-            )
+            src_obj, _, src_orig_idx = _create_esmf_grid(source_ds, method, periodic, mask_var, coord_sys=coord_sys)
             if isinstance(src_obj, esmpy.Mesh):
-                meshloc = (
-                    esmpy.MeshLoc.ELEMENT
-                    if method == "conservative"
-                    else esmpy.MeshLoc.NODE
-                )
+                meshloc = esmpy.MeshLoc.ELEMENT if method == "conservative" else esmpy.MeshLoc.NODE
                 src_field = esmpy.Field(src_obj, name="src", meshloc=meshloc)
             else:
                 src_field = esmpy.Field(src_obj, name="src")
             _WORKER_CACHE[src_cache_key] = (src_field, src_orig_idx)
 
         # 2. Create target ESMF object (chunk is small, no need to cache)
-        dst_obj, _, dst_orig_idx = _create_esmf_grid(
-            chunk_ds, method, periodic=False, mask_var=None, coord_sys=coord_sys
-        )
+        dst_obj, _, dst_orig_idx = _create_esmf_grid(chunk_ds, method, periodic=False, mask_var=None, coord_sys=coord_sys)
         if isinstance(dst_obj, esmpy.Mesh):
-            meshloc = (
-                esmpy.MeshLoc.ELEMENT
-                if method == "conservative"
-                else esmpy.MeshLoc.NODE
-            )
+            meshloc = esmpy.MeshLoc.ELEMENT if method == "conservative" else esmpy.MeshLoc.NODE
             dst_field = esmpy.Field(dst_obj, name="dst", meshloc=meshloc)
         else:
             dst_field = esmpy.Field(dst_obj, name="dst")
@@ -284,16 +270,12 @@ def _compute_chunk_weights(
             dst_field.get_area()
             dst_areas = np.asarray(dst_field.data)
             n_dst = int(np.max(dst_orig_idx) + 1) if len(dst_orig_idx) > 0 else 0
-            orig_dst_areas = np.bincount(
-                dst_orig_idx, weights=dst_areas, minlength=n_dst
-            )
+            orig_dst_areas = np.bincount(dst_orig_idx, weights=dst_areas, minlength=n_dst)
 
             # Avoid division by zero
             scale_factors = np.zeros_like(dst_areas)
             valid = orig_dst_areas[dst_orig_idx] > 0
-            scale_factors[valid] = (
-                dst_areas[valid] / orig_dst_areas[dst_orig_idx][valid]
-            )
+            scale_factors[valid] = dst_areas[valid] / orig_dst_areas[dst_orig_idx][valid]
 
             row_dst_idx = weights["row_dst"] - 1
             weights["weights"] = weights["weights"] * scale_factors[row_dst_idx]
@@ -322,10 +304,7 @@ def _compute_chunk_weights(
             else:
                 # Structured target (2D)
                 n0, n1 = i0_end - i0_start, i1_end - i1_start
-                global_indices = (
-                    (np.arange(n0)[:, None] + i0_start) * total_size1
-                    + (np.arange(n1) + i1_start)
-                ).flatten()
+                global_indices = ((np.arange(n0)[:, None] + i0_start) * total_size1 + (np.arange(n1) + i1_start)).flatten()
 
         row_dst = weights["row_dst"] - 1
         col_src = weights["col_src"] - 1

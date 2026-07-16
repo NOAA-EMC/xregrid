@@ -12,6 +12,7 @@ Prerequisites:
 import xarray as xr
 from dask_jobqueue import SLURMCluster
 from distributed import Client
+
 from xregrid import Regridder, create_global_grid
 
 
@@ -105,9 +106,7 @@ def run_regridding(cluster):
 
     # 3. Initialize Regridder with parallel=True
     # This will use the Dask cluster to generate weights in parallel
-    regridder = Regridder(
-        ds, target_grid, method="bilinear", periodic=True, parallel=True
-    )
+    regridder = Regridder(ds, target_grid, method="bilinear", periodic=True, parallel=True)
 
     # 4. Apply regridding
     # The application itself will also be parallelized across the cluster

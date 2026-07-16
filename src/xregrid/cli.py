@@ -5,6 +5,7 @@ import os
 import sys
 
 import xarray as xr
+
 from xregrid import Regridder, create_global_grid, create_regional_grid
 from xregrid.utils import get_rdhpcs_cluster
 
@@ -30,9 +31,7 @@ def parse_args() -> argparse.Namespace:
         choices=["bilinear", "conservative", "nearest_s2d", "nearest_d2s", "patch"],
         help="Regridding method (default: bilinear).",
     )
-    parser.add_argument(
-        "--output", "-o", default="output.nc", help="Path to the output NetCDF file."
-    )
+    parser.add_argument("--output", "-o", default="output.nc", help="Path to the output NetCDF file.")
     parser.add_argument(
         "--extent",
         help="Target grid extent as min_lat,max_lat,min_lon,max_lon (only used if target is a resolution).",
@@ -47,12 +46,8 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Reuse weights if the weights file already exists.",
     )
-    parser.add_argument(
-        "--weights-file", default="weights.nc", help="Path to the weights file."
-    )
-    parser.add_argument(
-        "--skipna", action="store_true", help="Handle NaNs by re-normalizing weights."
-    )
+    parser.add_argument("--weights-file", default="weights.nc", help="Path to the weights file.")
+    parser.add_argument("--skipna", action="store_true", help="Handle NaNs by re-normalizing weights.")
 
     # Dask options
     dask_group = parser.add_argument_group("Dask options")
@@ -100,9 +95,7 @@ def main() -> None:
         client = Client(args.dask_scheduler)
         print(f"Connected to Dask scheduler: {args.dask_scheduler}")
     elif args.dask_jobqueue:
-        cluster = get_rdhpcs_cluster(
-            machine=args.dask_jobqueue, account=args.dask_account
-        )
+        cluster = get_rdhpcs_cluster(machine=args.dask_jobqueue, account=args.dask_account)
         from dask.distributed import Client
 
         client = Client(cluster)
@@ -121,28 +114,18 @@ def main() -> None:
             try:
                 res = float(args.target)
                 if args.extent:
-                    lat_min, lat_max, lon_min, lon_max = map(
-                        float, args.extent.split(",")
-                    )
-                    print(
-                        f"Creating regional target grid: res={res}, extent=[{lat_min}, {lat_max}, {lon_min}, {lon_max}]"
-                    )
-                    ds_tgt = create_regional_grid(
-                        (lat_min, lat_max), (lon_min, lon_max), res, res
-                    )
+                    lat_min, lat_max, lon_min, lon_max = map(float, args.extent.split(","))
+                    print(f"Creating regional target grid: res={res}, extent=[{lat_min}, {lat_max}, {lon_min}, {lon_max}]")
+                    ds_tgt = create_regional_grid((lat_min, lat_max), (lon_min, lon_max), res, res)
                 else:
                     print(f"Creating global target grid: res={res}")
                     ds_tgt = create_global_grid(res, res)
             except ValueError:
-                print(
-                    f"Error: target '{args.target}' is neither a file nor a valid resolution."
-                )
+                print(f"Error: target '{args.target}' is neither a file nor a valid resolution.")
                 sys.exit(1)
 
         # 4. Initialize Regridder
-        print(
-            f"Initializing Regridder (method={args.method}, periodic={args.periodic})"
-        )
+        print(f"Initializing Regridder (method={args.method}, periodic={args.periodic})")
         regridder = Regridder(
             ds_src,
             ds_tgt,

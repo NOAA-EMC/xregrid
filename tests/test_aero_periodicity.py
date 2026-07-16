@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import numpy as np
-import xarray as xr
-import pytest
 import dask.array as da
+import numpy as np
+import pytest
+import xarray as xr
 from dask.callbacks import Callback
+
 from xregrid import Regridder
 
 
@@ -48,12 +49,8 @@ def test_regridder_periodicity_lazy():
     lon_2d, lat_2d = np.meshgrid(lon_raw, lat_raw)
 
     # Chunk it to make it Dask-backed
-    lon_da = xr.DataArray(
-        da.from_array(lon_2d, chunks=(50, 50)), dims=("y", "x"), name="lon"
-    )
-    lat_da = xr.DataArray(
-        da.from_array(lat_2d, chunks=(50, 50)), dims=("y", "x"), name="lat"
-    )
+    lon_da = xr.DataArray(da.from_array(lon_2d, chunks=(50, 50)), dims=("y", "x"), name="lon")
+    lat_da = xr.DataArray(da.from_array(lat_2d, chunks=(50, 50)), dims=("y", "x"), name="lat")
 
     ds_src = xr.Dataset({"lon": lon_da, "lat": lat_da})
     ds_src.lon.attrs["units"] = "degrees_east"
@@ -68,9 +65,7 @@ def test_regridder_periodicity_lazy():
     )
 
     # Case 1: Lazy curvilinear triggers a warning
-    with pytest.warns(
-        UserWarning, match="Triggering hidden compute in _detect_periodicity"
-    ):
+    with pytest.warns(UserWarning, match="Triggering hidden compute in _detect_periodicity"):
         regridder = Regridder(ds_src, ds_tgt, method="bilinear")
     assert regridder.periodic is True
 
@@ -86,9 +81,7 @@ def test_regridder_periodicity_lazy():
         with counter:
             regridder = Regridder(ds_src_meta, ds_tgt, method="bilinear")
         assert regridder.periodic is True
-        assert counter.count == 0, (
-            f"Metadata-based detection triggered {counter.count} computes"
-        )
+        assert counter.count == 0, f"Metadata-based detection triggered {counter.count} computes"
 
     # Case 3: Explicit periodicity avoids compute and warning
     with patch("xregrid.regridder.Regridder._generate_weights"):
@@ -96,9 +89,7 @@ def test_regridder_periodicity_lazy():
         with counter:
             regridder = Regridder(ds_src, ds_tgt, method="bilinear", periodic=True)
         assert regridder.periodic is True
-        assert counter.count == 0, (
-            f"Explicit periodicity triggered {counter.count} computes"
-        )
+        assert counter.count == 0, f"Explicit periodicity triggered {counter.count} computes"
 
 
 if __name__ == "__main__":

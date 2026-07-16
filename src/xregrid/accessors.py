@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Union
+from typing import Any
 
 import xarray as xr
 
@@ -24,9 +24,7 @@ class RegridDataArrayAccessor:
         """
         self._obj = xarray_obj
 
-    def to(
-        self, target_grid: Union[xr.Dataset, Regridder], **kwargs: Any
-    ) -> xr.DataArray:
+    def to(self, target_grid: xr.Dataset | Regridder, **kwargs: Any) -> xr.DataArray:
         """
         Regrid the DataArray to a target grid or using a pre-computed Regridder.
 
@@ -70,9 +68,7 @@ class RegridDataArrayAccessor:
         source_ds = self._obj.to_dataset(name="_tmp_data")
         return Regridder(source_ds, target_grid, **kwargs)
 
-    def plot_diagnostics(
-        self, target_grid: xr.Dataset, mode: str = "static", **kwargs: Any
-    ) -> Any:
+    def plot_diagnostics(self, target_grid: xr.Dataset, mode: str = "static", **kwargs: Any) -> Any:
         """
         Visualize regridding diagnostics between this DataArray and a target grid.
 
@@ -111,9 +107,7 @@ class RegridDatasetAccessor:
         """
         self._obj = xarray_obj
 
-    def to(
-        self, target_grid: Union[xr.Dataset, Regridder], **kwargs: Any
-    ) -> xr.Dataset:
+    def to(self, target_grid: xr.Dataset | Regridder, **kwargs: Any) -> xr.Dataset:
         """
         Regrid the Dataset to a target grid or using a pre-computed Regridder.
 
@@ -153,9 +147,7 @@ class RegridDatasetAccessor:
         """
         return Regridder(self._obj, target_grid, **kwargs)
 
-    def plot_diagnostics(
-        self, target_grid: xr.Dataset, mode: str = "static", **kwargs: Any
-    ) -> Any:
+    def plot_diagnostics(self, target_grid: xr.Dataset, mode: str = "static", **kwargs: Any) -> Any:
         """
         Visualize regridding diagnostics between this Dataset and a target grid.
 
