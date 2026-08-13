@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import dask
 import numpy as np
 import xarray as xr
-import dask
-from xregrid.utils import create_grid_like, create_global_grid
+
+from xregrid.utils import create_global_grid, create_grid_like
 
 
 class ComputeCounter(dask.callbacks.Callback):

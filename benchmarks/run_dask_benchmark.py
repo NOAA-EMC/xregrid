@@ -29,9 +29,7 @@ def generate_mock_weights(n_src, n_dst, weights_per_row=4):
 
 
 def benchmark_dask(n_workers, n_chunks, n_lat=360, n_lon=720):
-    cluster = dask.distributed.LocalCluster(
-        n_workers=n_workers, threads_per_worker=1, processes=True
-    )
+    cluster = dask.distributed.LocalCluster(n_workers=n_workers, threads_per_worker=1, processes=True)
     client = dask.distributed.Client(cluster)
 
     try:
@@ -41,9 +39,7 @@ def benchmark_dask(n_workers, n_chunks, n_lat=360, n_lon=720):
 
         # 20 time steps
         data = np.random.rand(20, n_lat, n_lon).astype(np.float32)
-        da = xr.DataArray(data, dims=("time", "lat", "lon")).chunk(
-            {"time": 20 // n_chunks}
-        )
+        da = xr.DataArray(data, dims=("time", "lat", "lon")).chunk({"time": 20 // n_chunks})
 
         # We need to distribute weights to workers
         weights_key = "bench_weights"

@@ -7,9 +7,10 @@ are 2D arrays of latitude and longitude) to a standard rectilinear grid.
 We use the 'rasm' tutorial dataset which features a curvilinear Arctic grid.
 """
 
-import xarray as xr
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import xarray as xr
+
 from xregrid import Regridder
 
 # Load rasm tutorial dataset (curvilinear Arctic grid)

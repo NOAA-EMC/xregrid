@@ -12,9 +12,10 @@ Key concepts demonstrated:
 - Global periodicity for 4D atmospheric data
 """
 
-import xarray as xr
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import xarray as xr
+
 from xregrid import Regridder
 
 # Load multidimensional tutorial dataset (ERA-Interim)

@@ -11,9 +11,10 @@ to use with xarray. XRegrid bridges this gap by providing a high-level
 API while delivering better performance than other wrappers.
 """
 
-import xarray as xr
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import xarray as xr
+
 from xregrid import Regridder
 
 # --- Part 1: Load Sample Data ---

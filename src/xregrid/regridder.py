@@ -2,37 +2,37 @@ from __future__ import annotations
 
 import os
 import time
-from typing import TYPE_CHECKING, Any, Optional, Tuple, Type, Union
+from typing import TYPE_CHECKING, Any
 
 import cf_xarray  # noqa: F401
 import numpy as np
 import xarray as xr
 from scipy.sparse import coo_matrix
 
-from xregrid.utils import (
-    update_history,
-    get_crs_info,
-    is_dask,
-    is_cubed,
-    _get_min_max_lazy_aware,
-)
 from xregrid.constants import (
-    get_regrid_method_map,
-    get_extrap_method_map,
     get_coord_sys,
-)
-from xregrid.grid import (
-    _get_mesh_info,
-    _get_non_spatial_dims,
-    _create_esmf_grid,
+    get_extrap_method_map,
+    get_regrid_method_map,
 )
 from xregrid.core import _apply_weights_core, _setup_worker_cache
+from xregrid.grid import (
+    _create_esmf_grid,
+    _get_mesh_info,
+    _get_non_spatial_dims,
+)
 from xregrid.parallel import (
     _assemble_weights_task,
-    _get_weights_sum_task,
-    _get_nnz_task,
     _compute_chunk_weights,
+    _get_nnz_task,
+    _get_weights_sum_task,
     _sync_cache_from_worker_data,
+)
+from xregrid.utils import (
+    _get_min_max_lazy_aware,
+    get_crs_info,
+    is_cubed,
+    is_dask,
+    update_history,
 )
 
 if TYPE_CHECKING:
@@ -73,10 +73,10 @@ class Regridder:
     """
 
     # Internal state default values
-    source_grid_ds: Optional[xr.Dataset] = None
-    target_grid_ds: Optional[xr.Dataset] = None
+    source_grid_ds: xr.Dataset | None = None
+    target_grid_ds: xr.Dataset | None = None
     method: str = "bilinear"
-    mask_var: Optional[str] = None
+    mask_var: str | None = None
     filename: str = "weights.nc"
     skipna: bool = False
     na_thres: float = 1.0
@@ -84,32 +84,32 @@ class Regridder:
     provenance: list[str] = []
     _uid: str = ""
 
-    _shape_source: Optional[Tuple[int, ...]] = None
-    _shape_target: Optional[Tuple[int, ...]] = None
-    _dims_source: Optional[Tuple[str, ...]] = None
-    _dims_target: Optional[Tuple[str, ...]] = None
+    _shape_source: tuple[int, ...] | None = None
+    _shape_target: tuple[int, ...] | None = None
+    _dims_source: tuple[str, ...] | None = None
+    _dims_target: tuple[str, ...] | None = None
     _is_unstructured_src: bool = False
     _is_unstructured_tgt: bool = False
-    _total_weights: Optional[Union[np.ndarray, dask.distributed.Future]] = None
-    _weights_matrix: Optional[Union[csr_matrix, dask.distributed.Future]] = None
-    _dask_client: Optional[dask.distributed.Client] = None
-    _dask_futures: Optional[list[dask.distributed.Future]] = None
+    _total_weights: np.ndarray | dask.distributed.Future | None = None
+    _weights_matrix: csr_matrix | dask.distributed.Future | None = None
+    _dask_client: dask.distributed.Client | None = None
+    _dask_futures: list[dask.distributed.Future] | None = None
 
     def __init__(
         self,
         source_grid_ds: xr.Dataset,
         target_grid_ds: xr.Dataset,
         method: str = "bilinear",
-        mask_var: Optional[str] = None,
+        mask_var: str | None = None,
         reuse_weights: bool = False,
         filename: str = "weights.nc",
         skipna: bool = False,
         na_thres: float = 1.0,
-        periodic: Optional[bool] = None,
+        periodic: bool | None = None,
         mpi: bool = False,
         parallel: bool = False,
         compute: bool = True,
-        extrap_method: Optional[str] = None,
+        extrap_method: str | None = None,
         extrap_dist_exponent: float = 2.0,
     ) -> None:
         """
@@ -152,17 +152,14 @@ class Regridder:
             Exponent for IDW extrapolation.
         """
         if mpi and parallel:
-            raise ValueError(
-                "Cannot use both MPI and Dask (parallel=True) simultaneously."
-            )
+            raise ValueError("Cannot use both MPI and Dask (parallel=True) simultaneously.")
 
         if parallel:
             import importlib.util
 
             if importlib.util.find_spec("dask.distributed") is None:
                 raise ImportError(
-                    "Dask distributed is required for parallel=True. "
-                    "Please install it via `pip install dask distributed`."
+                    "Dask distributed is required for parallel=True. Please install it via `pip install dask distributed`."
                 )
 
         # Initialize ESMF Manager (required for some environments)
@@ -176,9 +173,7 @@ class Regridder:
                 # Use MULTI logkind for MPI parallelization
                 # Some versions of esmpy don't support logkind in Manager constructor
                 try:
-                    self._manager = esmpy.Manager(
-                        logkind=esmpy.LogKind.MULTI, debug=False
-                    )
+                    self._manager = esmpy.Manager(logkind=esmpy.LogKind.MULTI, debug=False)
                 except TypeError:
                     self._manager = esmpy.Manager(debug=False)
             else:
@@ -218,18 +213,12 @@ class Regridder:
 
             # Default to geographic if no CRS found (common for simple lat-lon)
             is_geographic = True
-            if (src_crs and not src_crs.is_geographic) or (
-                tgt_crs and not tgt_crs.is_geographic
-            ):
+            if (src_crs and not src_crs.is_geographic) or (tgt_crs and not tgt_crs.is_geographic):
                 is_geographic = False
 
             # Determine if we have unstructured grids
-            _, _, _, _, is_unstructured_src = _get_mesh_info(
-                source_grid_ds, method=method, is_source=True
-            )
-            _, _, _, _, is_unstructured_tgt = _get_mesh_info(
-                target_grid_ds, method=method, is_source=False
-            )
+            _, _, _, _, is_unstructured_src = _get_mesh_info(source_grid_ds, method=method, is_source=True)
+            _, _, _, _, is_unstructured_tgt = _get_mesh_info(target_grid_ds, method=method, is_source=False)
 
             # Use SPH_DEG for all geographic (lat/lon in degrees) grids.
             # Using CART for geographic data is incorrect: ESMF's CART coordinate
@@ -260,21 +249,21 @@ class Regridder:
         self.target_grid_ds, self._tgt_was_sorted = self._normalize_grid(target_grid_ds)
 
         # Internal state
-        self._shape_source: Optional[Tuple[int, ...]] = None
-        self._shape_target: Optional[Tuple[int, ...]] = None
-        self._dims_source: Optional[Tuple[str, ...]] = None
-        self._dims_target: Optional[Tuple[str, ...]] = None
+        self._shape_source: tuple[int, ...] | None = None
+        self._shape_target: tuple[int, ...] | None = None
+        self._dims_source: tuple[str, ...] | None = None
+        self._dims_target: tuple[str, ...] | None = None
         self._is_unstructured_src: bool = False
         self._is_unstructured_tgt: bool = False
-        self._total_weights: Optional[np.ndarray] = None
-        self._weights_matrix: Optional[Any] = None
-        self._loaded_method: Optional[str] = None
-        self._loaded_periodic: Optional[bool] = None
-        self._loaded_extrap: Optional[str] = None
-        self.generation_time: Optional[float] = None
-        self._dask_futures: Optional[list] = None
-        self._dask_client: Optional[Any] = None
-        self._dask_start_time: Optional[float] = None
+        self._total_weights: np.ndarray | None = None
+        self._weights_matrix: Any | None = None
+        self._loaded_method: str | None = None
+        self._loaded_periodic: bool | None = None
+        self._loaded_extrap: str | None = None
+        self.generation_time: float | None = None
+        self._dask_futures: list | None = None
+        self._dask_client: Any | None = None
+        self._dask_start_time: float | None = None
         self.provenance: list[str] = []
 
         if reuse_weights and os.path.exists(filename):
@@ -288,12 +277,12 @@ class Regridder:
 
     @classmethod
     def from_weights(
-        cls: Type["Regridder"],
+        cls: type[Regridder],
         filename: str,
         source_grid_ds: xr.Dataset,
         target_grid_ds: xr.Dataset,
         **kwargs: Any,
-    ) -> "Regridder":
+    ) -> Regridder:
         """
         Create a Regridder from a pre-computed weights file.
 
@@ -322,7 +311,7 @@ class Regridder:
             **kwargs,
         )
 
-    def _normalize_grid(self, ds: xr.Dataset) -> Tuple[xr.Dataset, bool]:
+    def _normalize_grid(self, ds: xr.Dataset) -> tuple[xr.Dataset, bool]:
         """
         Normalize coordinate names and ensure they are in a predictable order.
 
@@ -346,18 +335,12 @@ class Regridder:
 
             # Only for rectilinear 1D coordinates
             # Must be 1D and not shared (unstructured grids share dimensions)
-            if (
-                lat_da.ndim == 1
-                and lon_da.ndim == 1
-                and lat_da.dims[0] != lon_da.dims[0]
-            ):
+            if lat_da.ndim == 1 and lon_da.ndim == 1 and lat_da.dims[0] != lon_da.dims[0]:
                 lat_dim = lat_da.dims[0]
                 lon_dim = lon_da.dims[0]
 
                 # Only sort if dimension coordinates are numeric
-                if np.issubdtype(ds[lat_dim].dtype, np.number) and np.issubdtype(
-                    ds[lon_dim].dtype, np.number
-                ):
+                if np.issubdtype(ds[lat_dim].dtype, np.number) and np.issubdtype(ds[lon_dim].dtype, np.number):
                     # Use indexes for monotonicity check to remain lazy.
                     # Indexes are always in memory in xarray, so this doesn't trigger
                     # computation of dask-backed coordinates.
@@ -376,10 +359,7 @@ class Regridder:
 
                 if x_da.ndim == 1 and y_da.ndim == 1 and x_da.dims[0] != y_da.dims[0]:
                     x_dim, y_dim = x_da.dims[0], y_da.dims[0]
-                    if not (
-                        ds.indexes[x_dim].is_monotonic_increasing
-                        and ds.indexes[y_dim].is_monotonic_increasing
-                    ):
+                    if not (ds.indexes[x_dim].is_monotonic_increasing and ds.indexes[y_dim].is_monotonic_increasing):
                         ds = ds.sortby([y_dim, x_dim])
                         was_sorted = True
             except (KeyError, AttributeError, ValueError):
@@ -399,36 +379,20 @@ class Regridder:
             If the loaded weights do not match the current regridding configuration.
         """
         # Get current grid info
-        _, _, src_shape, src_dims, _ = _get_mesh_info(
-            self.source_grid_ds, method=self.method, is_source=True
-        )
-        _, _, dst_shape, dst_dims, _ = _get_mesh_info(
-            self.target_grid_ds, method=self.method, is_source=False
-        )
+        _, _, src_shape, src_dims, _ = _get_mesh_info(self.source_grid_ds, method=self.method, is_source=True)
+        _, _, dst_shape, dst_dims, _ = _get_mesh_info(self.target_grid_ds, method=self.method, is_source=False)
 
         if src_shape != self._shape_source:
-            raise ValueError(
-                f"Source grid shape {src_shape} does not match "
-                f"loaded weights source shape {self._shape_source}"
-            )
+            raise ValueError(f"Source grid shape {src_shape} does not match loaded weights source shape {self._shape_source}")
         if dst_shape != self._shape_target:
-            raise ValueError(
-                f"Target grid shape {dst_shape} does not match "
-                f"loaded weights target shape {self._shape_target}"
-            )
+            raise ValueError(f"Target grid shape {dst_shape} does not match loaded weights target shape {self._shape_target}")
 
         # Check regridding parameters
         if self._loaded_method is not None and self._loaded_method != self.method:
-            raise ValueError(
-                f"Requested method '{self.method}' does not match "
-                f"loaded weights method '{self._loaded_method}'"
-            )
+            raise ValueError(f"Requested method '{self.method}' does not match loaded weights method '{self._loaded_method}'")
 
         if self._loaded_periodic is not None and self._loaded_periodic != self.periodic:
-            raise ValueError(
-                f"Requested periodic={self.periodic} does not match "
-                f"loaded weights periodic={self._loaded_periodic}"
-            )
+            raise ValueError(f"Requested periodic={self.periodic} does not match loaded weights periodic={self._loaded_periodic}")
 
         if self._loaded_extrap is not None:
             current_extrap = self.extrap_method or "none"
@@ -440,21 +404,15 @@ class Regridder:
 
         if hasattr(self, "_loaded_skipna") and self._loaded_skipna is not None:
             if self._loaded_skipna != self.skipna:
-                raise ValueError(
-                    f"Requested skipna={self.skipna} does not match "
-                    f"loaded weights skipna={self._loaded_skipna}"
-                )
+                raise ValueError(f"Requested skipna={self.skipna} does not match loaded weights skipna={self._loaded_skipna}")
 
         if hasattr(self, "_loaded_na_thres") and self._loaded_na_thres is not None:
             if abs(self._loaded_na_thres - self.na_thres) > 1e-6:
                 raise ValueError(
-                    f"Requested na_thres={self.na_thres} does not match "
-                    f"loaded weights na_thres={self._loaded_na_thres}"
+                    f"Requested na_thres={self.na_thres} does not match loaded weights na_thres={self._loaded_na_thres}"
                 )
 
-    def _create_esmf_object(
-        self, ds: xr.Dataset, is_source: bool = True
-    ) -> Tuple[Any, list[str], Optional[np.ndarray]]:
+    def _create_esmf_object(self, ds: xr.Dataset, is_source: bool = True) -> tuple[Any, list[str], np.ndarray | None]:
         """
         Creates an ESMF Grid or LocStream and updates internal metadata.
 
@@ -505,31 +463,19 @@ class Regridder:
             return
 
         start_time = time.perf_counter()
-        src_obj, src_prov, src_orig_idx = self._create_esmf_object(
-            self.source_grid_ds, is_source=True
-        )
-        dst_obj, dst_prov, dst_orig_idx = self._create_esmf_object(
-            self.target_grid_ds, is_source=False
-        )
+        src_obj, src_prov, src_orig_idx = self._create_esmf_object(self.source_grid_ds, is_source=True)
+        dst_obj, dst_prov, dst_orig_idx = self._create_esmf_object(self.target_grid_ds, is_source=False)
         self.provenance.extend(src_prov)
         self.provenance.extend(dst_prov)
 
         if isinstance(src_obj, esmpy.Mesh):
-            meshloc = (
-                esmpy.MeshLoc.ELEMENT
-                if self.method == "conservative"
-                else esmpy.MeshLoc.NODE
-            )
+            meshloc = esmpy.MeshLoc.ELEMENT if self.method == "conservative" else esmpy.MeshLoc.NODE
             src_field = esmpy.Field(src_obj, name="src", meshloc=meshloc)
         else:
             src_field = esmpy.Field(src_obj, name="src")
 
         if isinstance(dst_obj, esmpy.Mesh):
-            meshloc = (
-                esmpy.MeshLoc.ELEMENT
-                if self.method == "conservative"
-                else esmpy.MeshLoc.NODE
-            )
+            meshloc = esmpy.MeshLoc.ELEMENT if self.method == "conservative" else esmpy.MeshLoc.NODE
             dst_field = esmpy.Field(dst_obj, name="dst", meshloc=meshloc)
         else:
             dst_field = esmpy.Field(dst_obj, name="dst")
@@ -538,10 +484,7 @@ class Regridder:
             regrid_method = self.method_map[self.method]
         except KeyError:
             available_methods = ", ".join(self.method_map.keys())
-            raise ValueError(
-                f"Method '{self.method}' is not supported. "
-                f"Available methods are: {available_methods}"
-            )
+            raise ValueError(f"Method '{self.method}' is not supported. Available methods are: {available_methods}") from None
 
         regrid_kwargs = {
             "regrid_method": regrid_method,
@@ -570,12 +513,8 @@ class Regridder:
                     "are not in [-90, 90] or if periodic grids have an extent of exactly 360 degrees."
                 ) from e
             elif "ESMC_RC_GRID_PARTITION" in msg:
-                raise RuntimeError(
-                    "ESMF Grid partition error. Check for extremely small or degenerate grid cells."
-                ) from e
-            raise RuntimeError(
-                f"ESMPy failed to initialize Regrid object: {msg}"
-            ) from e
+                raise RuntimeError("ESMF Grid partition error. Check for extremely small or degenerate grid cells.") from e
+            raise RuntimeError(f"ESMPy failed to initialize Regrid object: {msg}") from e
 
         # Explicit check for overlaps
         fl, fil = regrid.get_factors()
@@ -595,16 +534,12 @@ class Regridder:
             dst_field.get_area()
             dst_areas = np.asarray(dst_field.data)
             n_dst = int(np.prod(self._shape_target))
-            orig_dst_areas = np.bincount(
-                dst_orig_idx, weights=dst_areas, minlength=n_dst
-            )
+            orig_dst_areas = np.bincount(dst_orig_idx, weights=dst_areas, minlength=n_dst)
 
             # Avoid division by zero
             scale_factors = np.zeros_like(dst_areas)
             valid = orig_dst_areas[dst_orig_idx] > 0
-            scale_factors[valid] = (
-                dst_areas[valid] / orig_dst_areas[dst_orig_idx][valid]
-            )
+            scale_factors[valid] = dst_areas[valid] / orig_dst_areas[dst_orig_idx][valid]
 
             row_dst_idx = weights["row_dst"] - 1
             weights["weights"] = weights["weights"] * scale_factors[row_dst_idx]
@@ -633,7 +568,7 @@ class Regridder:
                     rows = []
                     cols = []
                     data = []
-                    for i, w in enumerate(all_weights):
+                    for w in all_weights:
                         r = w["row_dst"] - 1
                         c = w["col_src"] - 1
                         # Note: we already mapped and scaled the weights locally on each PET,
@@ -670,9 +605,7 @@ class Regridder:
         n_src = int(np.prod(self._shape_source))
         n_dst = int(np.prod(self._shape_target))
 
-        self._weights_matrix = coo_matrix(
-            (data, (rows, cols)), shape=(n_dst, n_src)
-        ).tocsr()
+        self._weights_matrix = coo_matrix((data, (rows, cols)), shape=(n_dst, n_src)).tocsr()
 
         if self.skipna:
             # Optimization: Use sum(axis=1) instead of memory-intensive ones multiplication
@@ -698,17 +631,13 @@ class Regridder:
 
         # Get grid info and populate internal state
         # Source
-        _, _, src_shape, src_dims, is_unstructured_src = _get_mesh_info(
-            self.source_grid_ds, method=self.method, is_source=True
-        )
+        _, _, src_shape, src_dims, is_unstructured_src = _get_mesh_info(self.source_grid_ds, method=self.method, is_source=True)
         self._shape_source = src_shape
         self._dims_source = src_dims
         self._is_unstructured_src = is_unstructured_src
 
         # Target
-        _, _, dst_shape, dst_dims, is_unstructured_dst = _get_mesh_info(
-            self.target_grid_ds, method=self.method, is_source=False
-        )
+        _, _, dst_shape, dst_dims, is_unstructured_dst = _get_mesh_info(self.target_grid_ds, method=self.method, is_source=False)
         self._shape_target = dst_shape
         self._dims_target = dst_dims
         self._is_unstructured_tgt = is_unstructured_dst
@@ -825,7 +754,7 @@ class Regridder:
         if compute:
             self.compute()
 
-    def persist(self) -> "Regridder":
+    def persist(self) -> Regridder:
         """
         Ensure tasks are submitted to the cluster.
 
@@ -866,15 +795,11 @@ class Regridder:
 
         # Perform concatenation on a worker to protect driver memory
         # We use top-level task functions to avoid capturing 'self' and mocks.
-        self._weights_matrix = self._dask_client.submit(
-            _assemble_weights_task, self._dask_futures, n_src, n_dst
-        )
+        self._weights_matrix = self._dask_client.submit(_assemble_weights_task, self._dask_futures, n_src, n_dst)
 
         if self.skipna:
             # Compute total weights sum on worker too
-            self._total_weights = self._dask_client.submit(
-                _get_weights_sum_task, self._weights_matrix
-            )
+            self._total_weights = self._dask_client.submit(_get_weights_sum_task, self._weights_matrix)
 
         if self._dask_start_time:
             self.generation_time = time.perf_counter() - self._dask_start_time
@@ -924,9 +849,7 @@ class Regridder:
                 "provenance": "; ".join(self.provenance) if self.provenance else "",
                 "extrap_method": self.extrap_method or "none",
                 "extrap_dist_exponent": self.extrap_dist_exponent,
-                "generation_time": self.generation_time
-                if self.generation_time
-                else 0.0,
+                "generation_time": self.generation_time if self.generation_time else 0.0,
             },
         )
         update_history(ds_weights, "Weights generated by Regridder")
@@ -944,7 +867,7 @@ class Regridder:
             n_src = ds_weights.attrs["n_src"]
             n_dst = ds_weights.attrs["n_dst"]
 
-            def _to_tuple(attr: Any) -> Tuple[Any, ...]:
+            def _to_tuple(attr: Any) -> tuple[Any, ...]:
                 """
                 Convert attribute to tuple.
 
@@ -980,9 +903,7 @@ class Regridder:
             if loaded_prov:
                 self.provenance = loaded_prov.split("; ")
 
-        self._weights_matrix = coo_matrix(
-            (data, (rows, cols)), shape=(n_dst, n_src)
-        ).tocsr()
+        self._weights_matrix = coo_matrix((data, (rows, cols)), shape=(n_dst, n_src)).tocsr()
 
         if self.skipna:
             # Optimization: Use sum(axis=1) instead of memory-intensive ones multiplication
@@ -1058,11 +979,7 @@ class Regridder:
 
                 # Also clear driver cache for this instance
                 client_id = getattr(client, "id", id(client))
-                keys_to_remove = [
-                    k
-                    for k in _DRIVER_CACHE.keys()
-                    if k[0] == client_id and self._uid in k[1]
-                ]
+                keys_to_remove = [k for k in _DRIVER_CACHE.keys() if k[0] == client_id and self._uid in k[1]]
                 for k in keys_to_remove:
                     del _DRIVER_CACHE[k]
         except (ImportError, ValueError):
@@ -1092,18 +1009,14 @@ class Regridder:
             import dask.array as da
 
             if self._total_weights is None:
-                self._total_weights = self._dask_client.submit(
-                    _get_weights_sum_task, self._weights_matrix
-                )
+                self._total_weights = self._dask_client.submit(_get_weights_sum_task, self._weights_matrix)
 
             # Convert Future to Dask array to preserve laziness
             n_dst = int(np.prod(self._shape_target))
 
             # Use dask.array.from_delayed to wrap the Future (or NumPy array)
             # as a lazy Dask array to avoid driver-side blocking.
-            weights_sum_da = da.from_delayed(
-                dask.delayed(self._total_weights), shape=(n_dst,), dtype=np.float64
-            )
+            weights_sum_da = da.from_delayed(dask.delayed(self._total_weights), shape=(n_dst,), dtype=np.float64)
 
             weights_sum_2d = weights_sum_da.reshape(self._shape_target)
             # Preserve laziness for the mask
@@ -1122,10 +1035,7 @@ class Regridder:
             coords = {
                 c: self.target_grid_ds.coords[c]
                 for c in self.target_grid_ds.coords
-                if self._dims_target is not None
-                and set(self.target_grid_ds.coords[c].dims).issubset(
-                    set(self._dims_target)
-                )
+                if self._dims_target is not None and set(self.target_grid_ds.coords[c].dims).issubset(set(self._dims_target))
             }
 
         dims_target = self._dims_target
@@ -1156,9 +1066,7 @@ class Regridder:
         )
         return ds
 
-    def quality_report(
-        self, skip_heavy: bool = False, format: str = "dict"
-    ) -> Union[dict[str, Any], xr.Dataset]:
+    def quality_report(self, skip_heavy: bool = False, format: str = "dict") -> dict[str, Any] | xr.Dataset:
         """
         Generate a scientific quality report of the regridding weights.
 
@@ -1205,15 +1113,11 @@ class Regridder:
                     import dask.array as da
 
                     client = self._dask_client or dask.distributed.get_client()
-                    n_weights_future = client.submit(
-                        _get_nnz_task, self._weights_matrix
-                    )
+                    n_weights_future = client.submit(_get_nnz_task, self._weights_matrix)
 
                     if format == "dataset":
                         # Preserve laziness for dataset output
-                        n_weights = da.from_delayed(
-                            dask.delayed(n_weights_future), shape=(), dtype=int
-                        )
+                        n_weights = da.from_delayed(dask.delayed(n_weights_future), shape=(), dtype=int)
                     else:
                         # For dict, we still need to wait to satisfy return type
                         n_weights = int(n_weights_future.result())
@@ -1253,9 +1157,7 @@ class Regridder:
                     {
                         "unmapped_count": int(unmapped_count),
                         "unmapped_fraction": float(unmapped_fraction),
-                        "weight_sum_min": float(weight_sum_min)
-                        if int(unmapped_count) < n_dst
-                        else 0.0,
+                        "weight_sum_min": float(weight_sum_min) if int(unmapped_count) < n_dst else 0.0,
                         "weight_sum_max": float(weight_sum_max),
                         "weight_sum_mean": float(weight_sum_mean),
                     }
@@ -1299,9 +1201,7 @@ class Regridder:
                     "provenance": "; ".join(self.provenance),
                 },
             )
-            update_history(
-                ds_report, f"Generated scientific quality report (backend={backend})."
-            )
+            update_history(ds_report, f"Generated scientific quality report (backend={backend}).")
             return ds_report
 
         return report
@@ -1445,13 +1345,9 @@ class Regridder:
             return _plot_static(da_src, da_tgt, regridder=self, **kwargs)
         elif mode == "interactive":
             rasterize = kwargs.pop("rasterize", True)
-            return _plot_interactive(
-                da_src, da_tgt, regridder=self, rasterize=rasterize, **kwargs
-            )
+            return _plot_interactive(da_src, da_tgt, regridder=self, rasterize=rasterize, **kwargs)
         else:
-            raise ValueError(
-                f"Unknown plotting mode: '{mode}'. Must be 'static' or 'interactive'."
-            )
+            raise ValueError(f"Unknown plotting mode: '{mode}'. Must be 'static' or 'interactive'.")
 
     def plot_diagnostics(self, mode: str = "static", **kwargs: Any) -> Any:
         """
@@ -1482,17 +1378,15 @@ class Regridder:
             rasterize = kwargs.pop("rasterize", True)
             return _plot_interactive(self, rasterize=rasterize, **kwargs)
         else:
-            raise ValueError(
-                f"Unknown plotting mode: '{mode}'. Must be 'static' or 'interactive'."
-            )
+            raise ValueError(f"Unknown plotting mode: '{mode}'. Must be 'static' or 'interactive'.")
 
     def __call__(
         self,
-        obj: Union[xr.DataArray, xr.Dataset, Any],
-        skipna: Optional[bool] = None,
-        na_thres: Optional[float] = None,
+        obj: xr.DataArray | xr.Dataset | Any,
+        skipna: bool | None = None,
+        na_thres: float | None = None,
         keep_attrs: bool = True,
-    ) -> Union[xr.DataArray, xr.Dataset]:
+    ) -> xr.DataArray | xr.Dataset:
         """
         Apply regridding to an input DataArray or Dataset.
 
@@ -1535,8 +1429,7 @@ class Regridder:
             import warnings
 
             warnings.warn(
-                "Applying serial Regridder to Dask-backed data. "
-                "For better performance, initialize Regridder with parallel=True."
+                "Applying serial Regridder to Dask-backed data. For better performance, initialize Regridder with parallel=True."
             )
 
         if isinstance(obj, xr.Dataset):
@@ -1557,9 +1450,7 @@ class Regridder:
             if not is_regriddable:
                 try:
                     # Check for logical spatial dimensions
-                    spatial_dims = set(obj.cf["latitude"].dims) | set(
-                        obj.cf["longitude"].dims
-                    )
+                    spatial_dims = set(obj.cf["latitude"].dims) | set(obj.cf["longitude"].dims)
                     if spatial_dims.issubset(set(obj.dims)):
                         is_regriddable = True
                 except (KeyError, AttributeError):
@@ -1597,10 +1488,10 @@ class Regridder:
         self,
         da_in: xr.DataArray,
         update_history_attr: bool = True,
-        _processed_ids: Optional[set[Union[int, str]]] = None,
-        skipna: Optional[bool] = None,
-        na_thres: Optional[float] = None,
-        _precomputed_aux: Optional[dict[str, xr.DataArray]] = None,
+        _processed_ids: set[int | str] | None = None,
+        skipna: bool | None = None,
+        na_thres: float | None = None,
+        _precomputed_aux: dict[str, xr.DataArray] | None = None,
     ) -> xr.DataArray:
         """
         Regrid a single DataArray, including auxiliary spatial coordinates.
@@ -1651,14 +1542,10 @@ class Regridder:
         if skipna and self._total_weights is None and self._weights_matrix is not None:
             if hasattr(self._weights_matrix, "key"):
                 # Distributed path: compute total weights on cluster
-                self._total_weights = self._dask_client.submit(
-                    _get_weights_sum_task, self._weights_matrix
-                )
+                self._total_weights = self._dask_client.submit(_get_weights_sum_task, self._weights_matrix)
             else:
                 # Eager path: compute locally and flatten to 1D
-                self._total_weights = np.array(
-                    self._weights_matrix.sum(axis=1)
-                ).flatten()
+                self._total_weights = np.array(self._weights_matrix.sum(axis=1)).flatten()
 
         # Identify auxiliary coordinates that need regridding
         aux_coords_to_regrid = {}
@@ -1681,9 +1568,7 @@ class Regridder:
             if c_name in non_spatial_dims:
                 continue
 
-            if c_name not in da_in.dims and all(
-                d in c_da.dims for d in self._dims_source
-            ):
+            if c_name not in da_in.dims and all(d in c_da.dims for d in self._dims_source):
                 # This is an auxiliary spatial coordinate
                 if _precomputed_aux and c_name in _precomputed_aux:
                     aux_coords_to_regrid[c_name] = _precomputed_aux[c_name]
@@ -1746,9 +1631,7 @@ class Regridder:
                             da_in = da_in.rename({found_dim: self._dims_source[0]})
                         else:
                             # Fallback to cf-xarray discovery
-                            da_in = da_in.cf.rename(
-                                {da_in.cf["latitude"].dims[0]: self._dims_source[0]}
-                            )
+                            da_in = da_in.cf.rename({da_in.cf["latitude"].dims[0]: self._dims_source[0]})
                     except (KeyError, AttributeError, ValueError):
                         # Handle uxarray
                         if hasattr(da_in, "uxgrid"):
@@ -1802,9 +1685,7 @@ class Regridder:
                         )
                     else:
                         # Eager matrix: run on all workers
-                        client.run(
-                            _setup_worker_cache, weights_key_arg, self._weights_matrix
-                        )
+                        client.run(_setup_worker_cache, weights_key_arg, self._weights_matrix)
                     _DRIVER_CACHE[(client_id, weights_key_arg)] = True
                 weights_arg = weights_key_arg
 
@@ -1850,7 +1731,7 @@ class Regridder:
                 da_in.data = da_in.data.rechunk(tuple(new_chunks))
             else:
                 # Fallback to xarray's chunk() if it's already wrapped
-                da_in = da_in.chunk({d: -1 for d in input_core_dims})
+                da_in = da_in.chunk(dict.fromkeys(input_core_dims, -1))
 
         # Use allow_rechunk=True to support chunked core dimensions
         # and move output_sizes to dask_gufunc_kwargs for future compatibility
@@ -1873,9 +1754,7 @@ class Regridder:
             vectorize=False,
             output_dtypes=[da_in.dtype],
             dask_gufunc_kwargs={
-                "output_sizes": {
-                    d: s for d, s in zip(temp_output_core_dims, self._shape_target)
-                },
+                "output_sizes": dict(zip(temp_output_core_dims, self._shape_target, strict=True)),
                 "allow_rechunk": True,
             },
         )
@@ -1887,7 +1766,7 @@ class Regridder:
 
         # Determine if we need to rename temp dims to target dims
         rename_dict = {}
-        for temp, orig in zip(temp_output_core_dims, self._dims_target):
+        for temp, orig in zip(temp_output_core_dims, self._dims_target, strict=True):
             if temp in out.dims:
                 rename_dict[temp] = orig
 
@@ -1918,10 +1797,7 @@ class Regridder:
             # Aero Protocol: Ensure assigned coordinates are dimensionally compatible with the output
             c_dims = set(self.target_grid_ds.coords[c].dims)
             out_dims = set(out.dims)
-            if (
-                c_dims.issubset(set(self._dims_target))
-                or c in [target_gm_name, target_mesh_name]
-            ) and c_dims.issubset(out_dims):
+            if (c_dims.issubset(set(self._dims_target)) or c in [target_gm_name, target_mesh_name]) and c_dims.issubset(out_dims):
                 target_coords_to_assign[c] = self.target_grid_ds.coords[c]
 
         # Also check data_vars for topology/mapping that might be needed as coords
@@ -1947,10 +1823,7 @@ class Regridder:
                 if attr in topology_attrs:
                     ref_vars = topology_attrs[attr].split()
                     for rv in ref_vars:
-                        if (
-                            rv in self.target_grid_ds
-                            and rv not in target_coords_to_assign
-                        ):
+                        if rv in self.target_grid_ds and rv not in target_coords_to_assign:
                             rv_dims = set(self.target_grid_ds[rv].dims)
                             if rv_dims.issubset(set(out.dims)):
                                 target_coords_to_assign[rv] = self.target_grid_ds[rv]
@@ -2109,10 +1982,7 @@ class Regridder:
                 # 3. Last fallback: Check dimension name
                 if "lon" in lon.dims or "longitude" in lon.dims:
                     # If it's a global grid from a known generator, it might have attributes
-                    if (
-                        ds.attrs.get("history")
-                        and "global grid" in ds.attrs.get("history", "").lower()
-                    ):
+                    if ds.attrs.get("history") and "global grid" in ds.attrs.get("history", "").lower():
                         return True
         except Exception:
             pass
@@ -2121,8 +1991,8 @@ class Regridder:
     def _regrid_dataset(
         self,
         ds_in: xr.Dataset,
-        skipna: Optional[bool] = None,
-        na_thres: Optional[float] = None,
+        skipna: bool | None = None,
+        na_thres: float | None = None,
     ) -> xr.Dataset:
         """
         Regrid all data variables and auxiliary coordinates in a Dataset.
@@ -2146,7 +2016,7 @@ class Regridder:
         if na_thres is None:
             na_thres = self.na_thres
 
-        regridded_items: dict[str, Union[xr.DataArray, Any]] = {}
+        regridded_items: dict[str, xr.DataArray | Any] = {}
 
         # Identify non-spatial variables to exclude from regridding
         non_spatial_dims = _get_non_spatial_dims(ds_in)
@@ -2196,9 +2066,7 @@ class Regridder:
             else:
                 try:
                     # Check if variable has logical latitude and longitude
-                    spatial_dims = set(da.cf["latitude"].dims) | set(
-                        da.cf["longitude"].dims
-                    )
+                    spatial_dims = set(da.cf["latitude"].dims) | set(da.cf["longitude"].dims)
                     if spatial_dims.issubset(set(da.dims)):
                         is_regriddable = True
                 except (KeyError, AttributeError):
@@ -2252,9 +2120,10 @@ class Regridder:
 
         for c in self.target_grid_ds.coords:
             if c not in out.coords:
-                if set(self.target_grid_ds.coords[c].dims).issubset(
-                    set(self._dims_target)
-                ) or c in [target_gm_name, target_mesh_name]:
+                if set(self.target_grid_ds.coords[c].dims).issubset(set(self._dims_target)) or c in [
+                    target_gm_name,
+                    target_mesh_name,
+                ]:
                     out = out.assign_coords({c: self.target_grid_ds[c]})
 
         # Ensure mapping/topology vars from data_vars are also attached if needed

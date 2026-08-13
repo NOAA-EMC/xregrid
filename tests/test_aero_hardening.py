@@ -3,8 +3,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import xarray as xr
-from xregrid.utils import is_lazy, is_dask, is_cubed, create_grid_like
+
 from xregrid import Regridder
+from xregrid.utils import create_grid_like, is_cubed, is_dask, is_lazy
 
 
 def test_backend_utilities():
@@ -54,9 +55,7 @@ def test_create_grid_like_hardening():
         # (The warning is issued only if it falls back to compute)
         for warning in record:
             if "Triggering hidden compute" in str(warning.message):
-                pytest.fail(
-                    "create_grid_like triggered a compute despite metadata presence"
-                )
+                pytest.fail("create_grid_like triggered a compute despite metadata presence")
 
     assert grid.lat.size == 90
     assert grid.lon.size == 180

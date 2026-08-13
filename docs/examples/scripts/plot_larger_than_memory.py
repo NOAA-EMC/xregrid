@@ -17,11 +17,13 @@ Key concepts demonstrated:
 - Memory-efficient processing on a local machine.
 """
 
-import xarray as xr
-import numpy as np
-import dask.array as da
-from dask.distributed import Client, LocalCluster
 import time
+
+import dask.array as da
+import numpy as np
+import xarray as xr
+from dask.distributed import Client, LocalCluster
+
 from xregrid import Regridder
 
 
@@ -75,9 +77,7 @@ def run_example():
     # for high-resolution grids.
     print("\nGenerating weights in parallel...")
     start = time.time()
-    regridder = Regridder(
-        ds_src, ds_tgt, method="bilinear", periodic=True, parallel=True
-    )
+    regridder = Regridder(ds_src, ds_tgt, method="bilinear", periodic=True, parallel=True)
     print(f"Weight generation took: {time.time() - start:.2f}s")
 
     # 5. Apply regridding (Lazy)

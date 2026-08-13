@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 # Consolidated tests: utils
-
 import os
 from unittest.mock import MagicMock, patch
 
@@ -23,8 +22,8 @@ from xregrid import (
     plot_comparison,
     spatial_slice,
 )
-from xregrid.utils import get_crs_info
 from xregrid.grid import _get_mesh_info
+from xregrid.utils import get_crs_info
 
 try:
     import esmpy
@@ -52,9 +51,7 @@ def test_auto_bounds_conservative_numpy_dask():
 
     # 1. Eager path
     regridder_eager = Regridder(ds_src, ds_tgt, method="conservative")
-    da_src_eager = xr.DataArray(
-        np.random.rand(10, 20), dims=("lat", "lon"), coords=ds_src.coords
-    )
+    da_src_eager = xr.DataArray(np.random.rand(10, 20), dims=("lat", "lon"), coords=ds_src.coords)
     res_eager = regridder_eager(da_src_eager)
 
     # 2. Lazy path
@@ -78,9 +75,7 @@ def test_regridder_keep_attrs():
     ds_tgt = create_global_grid(20, 20)
 
     regridder = Regridder(ds_src, ds_tgt, method="conservative")
-    da_src = xr.DataArray(
-        np.random.rand(10, 20), dims=("lat", "lon"), coords=ds_src.coords, name="foo"
-    )
+    da_src = xr.DataArray(np.random.rand(10, 20), dims=("lat", "lon"), coords=ds_src.coords, name="foo")
     da_src.attrs["my_custom_attr"] = "preserve_me"
 
     # Eager: custom attr preserved AND regridder history kept
@@ -214,19 +209,13 @@ def test_crs_propagation_dataarray():
 
     # 2. Setup Target Grid (Projected UTM zone 33N)
     # UTM zone 33N is approx centered at 15E
-    target_ds = create_grid_from_crs(
-        crs="EPSG:32633", extent=(400000, 600000, 5000000, 5200000), res=10000
-    )
+    target_ds = create_grid_from_crs(crs="EPSG:32633", extent=(400000, 600000, 5000000, 5200000), res=10000)
 
     # Create source data
     data = np.random.rand(src_ds.sizes["lat"], src_ds.sizes["lon"])
     # Filter coords to only those compatible with (lat, lon) dims
-    compatible_coords = {
-        k: v for k, v in src_ds.coords.items() if set(v.dims).issubset({"lat", "lon"})
-    }
-    da_src_numpy = xr.DataArray(
-        data, coords=compatible_coords, dims=("lat", "lon"), name="test_data"
-    )
+    compatible_coords = {k: v for k, v in src_ds.coords.items() if set(v.dims).issubset({"lat", "lon"})}
+    da_src_numpy = xr.DataArray(data, coords=compatible_coords, dims=("lat", "lon"), name="test_data")
 
     da_src_dask = da_src_numpy.chunk({"lat": 5, "lon": 5})
 
@@ -489,9 +478,7 @@ def test_spatial_slice_rectilinear() -> None:
     assert "Spatially sliced" in ds_sliced.attrs["history"]
 
     # 2. Lazy (Dask)
-    ds_lazy = create_global_grid(
-        res_lat=1.0, res_lon=1.0, chunks={"lat": 10, "lon": 10}
-    )
+    ds_lazy = create_global_grid(res_lat=1.0, res_lon=1.0, chunks={"lat": 10, "lon": 10})
     ds_sliced_lazy = spatial_slice(ds_lazy, extent)
 
     # In xarray, dimension coordinates are often eager (NumPy) due to indexing.
@@ -580,9 +567,7 @@ def test_create_global_grid_lazy():
     assert not ds_eager.chunks
 
     # Lazy (Dask)
-    ds_lazy = create_global_grid(
-        res_lat=res_lat, res_lon=res_lon, chunks={"lat": 9, "lon": 9}
-    )
+    ds_lazy = create_global_grid(res_lat=res_lat, res_lon=res_lon, chunks={"lat": 9, "lon": 9})
     assert ds_lazy.chunks
 
     # Assert values are identical
@@ -959,9 +944,7 @@ def test_regridder_dtype_time_fallback():
     assert "mytime" not in regridder._dims_source
 
     # Test DataArray regridding with this non-standard time dim
-    da = xr.DataArray(
-        np.random.rand(1, 10, 20), coords=src_ds.coords, dims=("mytime", "lat", "lon")
-    )
+    da = xr.DataArray(np.random.rand(1, 10, 20), coords=src_ds.coords, dims=("mytime", "lat", "lon"))
 
     res = regridder(da)
     assert "mytime" in res.dims
@@ -1052,9 +1035,7 @@ def test_regridder_vertical_dimension_detection():
     regridder = Regridder(src_ds, tgt_ds)
     assert "lev" not in regridder._dims_source
 
-    da = xr.DataArray(
-        np.random.rand(3, 10, 20), coords=src_ds.coords, dims=("lev", "lat", "lon")
-    )
+    da = xr.DataArray(np.random.rand(3, 10, 20), coords=src_ds.coords, dims=("lev", "lat", "lon"))
 
     res = regridder(da)
     assert "lev" in res.dims
@@ -1094,9 +1075,7 @@ def test_regridder_ugrid_with_time():
     for i in range(n_face):
         conn[i] = [i, i + 1, (i + 2) % n_node]
 
-    mock_uxgrid.face_node_connectivity = xr.DataArray(
-        conn, dims=["n_face", "n_max_face_nodes"]
-    )
+    mock_uxgrid.face_node_connectivity = xr.DataArray(conn, dims=["n_face", "n_max_face_nodes"])
     mock_uxgrid.face_node_connectivity.attrs["start_index"] = 0
     mock_uxgrid.face_node_connectivity.attrs["_FillValue"] = -1
 
@@ -1247,9 +1226,7 @@ def test_regridder_user_specific_structure():
     assert "mesh" in res_ds.data_vars  # Non-spatial data var should be preserved
 
 
-@pytest.mark.skip(
-    reason="ESMF abort (SIGABRT) in ESMP_MeshGetElemCoordPtr with small synthetic mesh — kills process"
-)
+@pytest.mark.skip(reason="ESMF abort (SIGABRT) in ESMP_MeshGetElemCoordPtr with small synthetic mesh — kills process")
 def test_regridder_raw_ugrid_conservative_with_time():
     n_face = 10
     n_node = 12
@@ -1391,9 +1368,7 @@ def test_create_global_grid():
 
 
 def test_create_regional_grid():
-    ds = create_regional_grid(
-        lat_range=(-45, 45), lon_range=(0, 90), res_lat=5, res_lon=5
-    )
+    ds = create_regional_grid(lat_range=(-45, 45), lon_range=(0, 90), res_lat=5, res_lon=5)
     assert ds.lat.size == 18  # 90 / 5
     assert ds.lon.size == 18  # 90 / 5
     assert ds.lat.min() == -42.5

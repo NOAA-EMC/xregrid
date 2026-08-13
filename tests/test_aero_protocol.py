@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import xarray as xr
+
 from xregrid import Regridder
 from xregrid.utils import create_global_grid
 
@@ -19,9 +20,7 @@ def test_aero_protocol_equivalence():
     # Create source data with some pattern and NaNs
     data = np.sin(np.deg2rad(ds_src.lat)) * np.cos(np.deg2rad(ds_src.lon))
     # Coordinates for the DataArray should only include relevant dimensions
-    coords = {
-        k: v for k, v in ds_src.coords.items() if set(v.dims).issubset({"lat", "lon"})
-    }
+    coords = {k: v for k, v in ds_src.coords.items() if set(v.dims).issubset({"lat", "lon"})}
     da_numpy = xr.DataArray(data, coords=coords, dims=("lat", "lon"), name="test_data")
 
     # Add some NaNs to test skipna
@@ -62,9 +61,7 @@ def test_non_spatial_preservation():
 
     # Create dataset with various dimension names
     ds = xr.Dataset(
-        data_vars={
-            "temp": (("time", "lev", "lat", "lon"), np.random.rand(2, 5, 10, 20))
-        },
+        data_vars={"temp": (("time", "lev", "lat", "lon"), np.random.rand(2, 5, 10, 20))},
         coords={
             "time": np.arange(2),
             "lev": np.arange(5),

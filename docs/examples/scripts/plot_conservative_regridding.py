@@ -10,8 +10,9 @@ area-integrated conservation. Conservative regridding requires cell boundaries
 (bounds), which are automatically provided by XRegrid's grid creation utilities.
 """
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+
 from xregrid import Regridder, create_global_grid
 
 # 1. Create a source grid with boundaries (2.0° resolution)

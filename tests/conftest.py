@@ -1,4 +1,5 @@
 import sys
+
 import numpy as np
 
 
@@ -26,11 +27,7 @@ def setup_esmpy_mock():
                 if staggerloc == 0:  # CENTER
                     shape = list(self.max_index)
                 elif staggerloc == 1:  # CORNER
-                    if (
-                        self.num_peri_dims
-                        and self.num_peri_dims > 0
-                        and self.periodic_dim is not None
-                    ):
+                    if self.num_peri_dims and self.num_peri_dims > 0 and self.periodic_dim is not None:
                         shape[self.periodic_dim] -= 1
                 self.coords[key] = np.zeros(tuple(shape))
             return self.coords[key]
@@ -42,11 +39,7 @@ def setup_esmpy_mock():
                 if staggerloc == 0:  # CENTER
                     shape = list(self.max_index)
                 elif staggerloc == 1:  # CORNER
-                    if (
-                        self.num_peri_dims
-                        and self.num_peri_dims > 0
-                        and self.periodic_dim is not None
-                    ):
+                    if self.num_peri_dims and self.num_peri_dims > 0 and self.periodic_dim is not None:
                         shape[self.periodic_dim] -= 1
                 self.items[key] = np.zeros(tuple(shape))
             return self.items[key]

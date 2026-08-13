@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 try:
     import esmpy
@@ -8,7 +8,7 @@ except ImportError:
     esmpy = None
 
 
-def get_regrid_method_map() -> Dict[str, Any]:
+def get_regrid_method_map() -> dict[str, Any]:
     """
     Get the mapping of string names to ESMF RegridMethod constants.
 
@@ -28,7 +28,7 @@ def get_regrid_method_map() -> Dict[str, Any]:
     }
 
 
-def get_extrap_method_map() -> Dict[str, Any]:
+def get_extrap_method_map() -> dict[str, Any]:
     """
     Get the mapping of string names to ESMF ExtrapMethod constants.
 
@@ -46,7 +46,7 @@ def get_extrap_method_map() -> Dict[str, Any]:
     }
 
 
-def get_coord_sys(name: str = "SPH_DEG") -> Optional[Any]:
+def get_coord_sys(name: str = "SPH_DEG") -> Any | None:
     """
     Get an ESMF CoordSys constant by name.
 

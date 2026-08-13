@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 import xarray as xr
+
 from xregrid import Regridder, create_global_grid
 
 
@@ -30,9 +31,7 @@ def test_all_nan_input_robustness():
     tgt = create_global_grid(5, 5)
 
     data = np.full((18, 36), np.nan)
-    da = xr.DataArray(
-        data, dims=("lat", "lon"), coords={"lat": src.lat, "lon": src.lon}
-    )
+    da = xr.DataArray(data, dims=("lat", "lon"), coords={"lat": src.lat, "lon": src.lon})
 
     regridder = Regridder(src, tgt, skipna=True)
     res = regridder(da)

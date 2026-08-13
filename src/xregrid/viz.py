@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any
 
 import xarray as xr
 
-from xregrid.utils import get_crs_info, _find_coord
+from xregrid.utils import _find_coord, get_crs_info
 
 if TYPE_CHECKING:
     from xregrid.regridder import Regridder
@@ -26,8 +26,8 @@ except ImportError:
     pyproj = None
 
 try:
-    import hvplot.xarray  # noqa: F401
     import holoviews as hv
+    import hvplot.xarray  # noqa: F401
 except ImportError:
     hvplot = None
     hv = None
@@ -39,7 +39,7 @@ def plot_static(
     da: xr.DataArray,
     projection: Any = None,
     transform: Any = None,
-    title: Optional[str] = None,
+    title: str | None = None,
     **kwargs: Any,
 ) -> Any:
     """
@@ -69,10 +69,7 @@ def plot_static(
         If matplotlib is not installed.
     """
     if plt is None:
-        raise ImportError(
-            "Matplotlib is required for plot_static. "
-            "Install it with `pip install matplotlib`."
-        )
+        raise ImportError("Matplotlib is required for plot_static. Install it with `pip install matplotlib`.")
 
     # Handle axes and faceting early to avoid multiple 'ax' arguments
     ax = kwargs.pop("ax", None)
@@ -108,7 +105,7 @@ def plot_static(
     extra_dims = [d for d in da.dims if d not in spatial_dims and d not in facet_dims]
 
     if extra_dims:
-        first_slice = {d: 0 for d in extra_dims}
+        first_slice = dict.fromkeys(extra_dims, 0)
         warnings.warn(
             f"DataArray has {da.ndim} dimensions, but only 2 spatial dimensions "
             f"(plus optional faceting) are supported for static plots. "
@@ -161,9 +158,7 @@ def plot_static(
 
     if ax is not None:
         if is_faceted:
-            warnings.warn(
-                "Providing an 'ax' with faceting ('col' or 'row') is not supported by xarray and will be ignored."
-            )
+            warnings.warn("Providing an 'ax' with faceting ('col' or 'row') is not supported by xarray and will be ignored.")
             ax = None
         else:
             # Ensure the existing axes is a GeoAxes if we are using cartopy
@@ -262,9 +257,7 @@ def plot(
     elif mode == "interactive":
         return plot_interactive(da, **kwargs)
     else:
-        raise ValueError(
-            f"Unknown plotting mode: '{mode}'. Must be 'static' or 'interactive'."
-        )
+        raise ValueError(f"Unknown plotting mode: '{mode}'. Must be 'static' or 'interactive'.")
 
 
 def plot_interactive(
@@ -298,10 +291,7 @@ def plot_interactive(
         If HvPlot is not installed.
     """
     if not hvplot:
-        raise ImportError(
-            "HvPlot is required for plot_interactive. "
-            "Install it with `pip install hvplot`."
-        )
+        raise ImportError("HvPlot is required for plot_interactive. Install it with `pip install hvplot`.")
 
     # Automated CRS discovery for Track B (Interactive)
     # This ensures "No Ambiguous Plots" even in exploratory mode.
@@ -325,7 +315,7 @@ def plot_interactive(
 
 
 def plot_diagnostics(
-    regridder: "Regridder",
+    regridder: Regridder,
     projection: Any = None,
     **kwargs: Any,
 ) -> Any:
@@ -407,9 +397,9 @@ def plot_diagnostics(
 
 
 def plot_diagnostics_interactive(
-    regridder: "Regridder",
+    regridder: Regridder,
     rasterize: bool = True,
-    title: Optional[str] = None,
+    title: str | None = None,
     **kwargs: Any,
 ) -> Any:
     """
@@ -441,21 +431,16 @@ def plot_diagnostics_interactive(
     """
     if not hvplot or hv is None:
         raise ImportError(
-            "HvPlot and HoloViews are required for plot_diagnostics_interactive. "
-            "Install them with `pip install hvplot holoviews`."
+            "HvPlot and HoloViews are required for plot_diagnostics_interactive. Install them with `pip install hvplot holoviews`."
         )
 
     ds_diag = regridder.diagnostics()
 
     # 1. Weight Sum Plot
-    p_sum = ds_diag.weight_sum.hvplot(
-        rasterize=rasterize, cmap="viridis", title="Weight Sum", **kwargs
-    )
+    p_sum = ds_diag.weight_sum.hvplot(rasterize=rasterize, cmap="viridis", title="Weight Sum", **kwargs)
 
     # 2. Unmapped Mask Plot
-    p_mask = ds_diag.unmapped_mask.hvplot(
-        rasterize=rasterize, cmap="Reds", title="Unmapped Mask (1=Unmapped)", **kwargs
-    )
+    p_mask = ds_diag.unmapped_mask.hvplot(rasterize=rasterize, cmap="Reds", title="Unmapped Mask (1=Unmapped)", **kwargs)
 
     layout = (p_sum + p_mask).cols(2)
 
@@ -470,12 +455,12 @@ def plot_diagnostics_interactive(
 def plot_comparison(
     da_src: xr.DataArray,
     da_tgt: xr.DataArray,
-    regridder: Optional[Any] = None,
+    regridder: Any | None = None,
     projection: Any = None,
     transform: Any = None,
     cmap: str = "viridis",
     diff_cmap: str = "RdBu_r",
-    title: Optional[str] = None,
+    title: str | None = None,
     **kwargs: Any,
 ) -> Any:
     """
@@ -588,11 +573,11 @@ def plot_comparison(
 def plot_comparison_interactive(
     da_src: xr.DataArray,
     da_tgt: xr.DataArray,
-    regridder: Optional[Any] = None,
+    regridder: Any | None = None,
     rasterize: bool = True,
     cmap: str = "viridis",
     diff_cmap: str = "RdBu_r",
-    title: Optional[str] = None,
+    title: str | None = None,
     **kwargs: Any,
 ) -> Any:
     """
@@ -632,8 +617,7 @@ def plot_comparison_interactive(
     """
     if not hvplot or hv is None:
         raise ImportError(
-            "HvPlot and HoloViews are required for plot_comparison_interactive. "
-            "Install them with `pip install hvplot holoviews`."
+            "HvPlot and HoloViews are required for plot_comparison_interactive. Install them with `pip install hvplot holoviews`."
         )
 
     # 1. Source Plot
@@ -669,7 +653,7 @@ def plot_comparison_interactive(
 
 
 def plot_weights(
-    regridder: "Regridder",
+    regridder: Regridder,
     row_idx: int,
     mode: str = "static",
     **kwargs: Any,
@@ -701,17 +685,13 @@ def plot_weights(
         return _plot_weights_static(regridder, row_idx, **kwargs)
     elif mode == "interactive":
         rasterize = kwargs.pop("rasterize", True)
-        return plot_weights_interactive(
-            regridder, row_idx, rasterize=rasterize, **kwargs
-        )
+        return plot_weights_interactive(regridder, row_idx, rasterize=rasterize, **kwargs)
     else:
-        raise ValueError(
-            f"Unknown plotting mode: '{mode}'. Must be 'static' or 'interactive'."
-        )
+        raise ValueError(f"Unknown plotting mode: '{mode}'. Must be 'static' or 'interactive'.")
 
 
 def _plot_weights_static(
-    regridder: "Regridder",
+    regridder: Regridder,
     row_idx: int,
     **kwargs: Any,
 ) -> Any:
@@ -733,13 +713,11 @@ def _plot_weights_static(
         The plot object.
     """
     da_weights = _get_weight_row_da(regridder, row_idx)
-    return plot_static(
-        da_weights, title=f"Weights for Destination Point {row_idx}", **kwargs
-    )
+    return plot_static(da_weights, title=f"Weights for Destination Point {row_idx}", **kwargs)
 
 
 def plot_weights_interactive(
-    regridder: "Regridder",
+    regridder: Regridder,
     row_idx: int,
     rasterize: bool = True,
     **kwargs: Any,
@@ -772,7 +750,7 @@ def plot_weights_interactive(
     )
 
 
-def _get_weight_row_da(regridder: "Regridder", row_idx: int) -> xr.DataArray:
+def _get_weight_row_da(regridder: Regridder, row_idx: int) -> xr.DataArray:
     """
     Extract a single weight row as a DataArray, optimized for remote weights.
 
@@ -792,9 +770,7 @@ def _get_weight_row_da(regridder: "Regridder", row_idx: int) -> xr.DataArray:
         # Optimized Distributed Path: extract row on cluster
         from .parallel import _get_weight_row_task
 
-        row = regridder._dask_client.submit(
-            _get_weight_row_task, regridder._weights_matrix, row_idx
-        ).result()
+        row = regridder._dask_client.submit(_get_weight_row_task, regridder._weights_matrix, row_idx).result()
     else:
         # Eager Path
         matrix = regridder.weights
@@ -804,19 +780,13 @@ def _get_weight_row_da(regridder: "Regridder", row_idx: int) -> xr.DataArray:
     coords = {
         c: regridder.source_grid_ds.coords[c]
         for c in regridder.source_grid_ds.coords
-        if regridder._dims_source is not None
-        and set(regridder.source_grid_ds.coords[c].dims).issubset(
-            set(regridder._dims_source)
-        )
+        if regridder._dims_source is not None and set(regridder.source_grid_ds.coords[c].dims).issubset(set(regridder._dims_source))
     }
 
     # Include topology/mapping from source grid
     for v in regridder.source_grid_ds.data_vars:
         var_obj = regridder.source_grid_ds[v]
-        if (
-            var_obj.attrs.get("cf_role") == "mesh_topology"
-            or "grid_mapping_name" in var_obj.attrs
-        ):
+        if var_obj.attrs.get("cf_role") == "mesh_topology" or "grid_mapping_name" in var_obj.attrs:
             coords[v] = var_obj
 
     da_weights = xr.DataArray(

@@ -1,7 +1,9 @@
 import time
+
 import numpy as np
 import xarray as xr
 import xesmf as xe
+
 from xregrid import Regridder
 
 
@@ -21,21 +23,15 @@ def create_sample_dataset(nlat, nlon, ntime=1):
     return ds
 
 
-def benchmark_resolution(
-    name, nlat_in, nlon_in, nlat_out, nlon_out, ntime=10, trials=3
-):
+def benchmark_resolution(name, nlat_in, nlon_in, nlat_out, nlon_out, ntime=10, trials=3):
     print(f"\n--- Benchmarking {name} ({ntime} time steps) ---")
     source_ds = create_sample_dataset(nlat_in, nlon_in, ntime=ntime)
     target_ds = create_sample_dataset(nlat_out, nlon_out, ntime=1)
 
     # --- Weight Generation ---
     print("Generating weights...")
-    regridder_xesmf = xe.Regridder(
-        source_ds.isel(time=0), target_ds.isel(time=0), method="bilinear", periodic=True
-    )
-    regridder_xregrid = Regridder(
-        source_ds.isel(time=0), target_ds.isel(time=0), method="bilinear", periodic=True
-    )
+    regridder_xesmf = xe.Regridder(source_ds.isel(time=0), target_ds.isel(time=0), method="bilinear", periodic=True)
+    regridder_xregrid = Regridder(source_ds.isel(time=0), target_ds.isel(time=0), method="bilinear", periodic=True)
 
     # --- Weight Application ---
     print(f"Applying weights ({trials} trials)...")
@@ -64,9 +60,7 @@ def benchmark_resolution(
         times_xregrid.append(time.perf_counter() - start)
     avg_xregrid = np.mean(times_xregrid) / ntime
 
-    print(
-        f"App avg per time step - xESMF: {avg_xesmf:.6f}s, XRegrid: {avg_xregrid:.6f}s"
-    )
+    print(f"App avg per time step - xESMF: {avg_xesmf:.6f}s, XRegrid: {avg_xregrid:.6f}s")
     print(f"Application Speedup: {avg_xesmf / avg_xregrid:.1f}x")
 
     return {
@@ -85,18 +79,12 @@ results.append(benchmark_resolution("1.0° Global", 180, 360, 180, 360, ntime=20
 results.append(benchmark_resolution("0.25° Global", 720, 1440, 720, 1440, ntime=3))
 
 # 0.1° Global
-results.append(
-    benchmark_resolution("0.1° Global", 1800, 3600, 1800, 3600, ntime=1, trials=1)
-)
+results.append(benchmark_resolution("0.1° Global", 1800, 3600, 1800, 3600, ntime=1, trials=1))
 
 print("\n\n" + "=" * 50)
 print("FINAL RESULTS SUMMARY (SINGLE TIME STEP REGRIDDING)")
 print("=" * 50)
-print(
-    f"{'Resolution':<15} | {'xESMF App (s)':<15} | {'XRegrid App (s)':<15} | {'Speedup':<10}"
-)
+print(f"{'Resolution':<15} | {'xESMF App (s)':<15} | {'XRegrid App (s)':<15} | {'Speedup':<10}")
 print("-" * 65)
 for r in results:
-    print(
-        f"{r['name']:<15} | {r['app_xesmf']:<15.6f} | {r['app_xregrid']:<15.6f} | {r['speedup']:<10.1f}x"
-    )
+    print(f"{r['name']:<15} | {r['app_xesmf']:<15.6f} | {r['app_xregrid']:<15.6f} | {r['speedup']:<10.1f}x")

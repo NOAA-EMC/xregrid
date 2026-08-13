@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import xarray as xr
+
 from xregrid.utils import create_global_grid, create_grid_from_crs, is_dask
 
 

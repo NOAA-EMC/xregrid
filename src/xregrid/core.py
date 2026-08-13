@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Optional, Tuple
-
-import numpy as np
-
-
 # Global cache for workers to reuse ESMF source objects and weight matrices
 # We use builtins to ensure the cache survives module re-imports in Dask workers.
 import builtins
+from typing import Any
+
+import numpy as np
 
 if not hasattr(builtins, "_XREGRID_WORKER_CACHE"):
     builtins._XREGRID_WORKER_CACHE = {}  # type: ignore
@@ -75,12 +73,12 @@ def _matmul(matrix: Any, data: np.ndarray) -> np.ndarray:
 def _apply_weights_core(
     data_block: np.ndarray,
     weights_matrix: Any,
-    dims_source: Tuple[str, ...],
-    shape_target: Tuple[int, ...],
+    dims_source: tuple[str, ...],
+    shape_target: tuple[int, ...],
     skipna: bool = False,
-    total_weights: Optional[np.ndarray] = None,
+    total_weights: np.ndarray | None = None,
     na_thres: float = 1.0,
-    weights_key: Optional[str] = None,
+    weights_key: str | None = None,
 ) -> np.ndarray:
     """
     Apply regridding weights to a data block (NumPy array).
@@ -124,17 +122,13 @@ def _apply_weights_core(
         weights_matrix = _WORKER_CACHE.get(weights_matrix_key)
 
     if weights_matrix is None:
-        raise RuntimeError(
-            f"Weights key '{weights_matrix_key}' not found in worker cache."
-        )
+        raise RuntimeError(f"Weights key '{weights_matrix_key}' not found in worker cache.")
 
     if isinstance(total_weights, str):
         total_weights_key = total_weights
         total_weights = _WORKER_CACHE.get(total_weights_key)
         if total_weights is None:
-            raise RuntimeError(
-                f"Total weights key '{total_weights_key}' not found in worker cache."
-            )
+            raise RuntimeError(f"Total weights key '{total_weights_key}' not found in worker cache.")
 
     original_shape = data_block.shape
     # Core dimensions are at the end
@@ -226,9 +220,7 @@ def _apply_weights_core(
                     # Masking of low-confidence points
                     # Ensure NaN value doesn't force promotion to float64
                     nan_val = result.dtype.type(np.nan)
-                    result = np.where(
-                        fraction_valid < (1.0 - na_thres - 1e-6), nan_val, result
-                    )
+                    result = np.where(fraction_valid < (1.0 - na_thres - 1e-6), nan_val, result)
     else:
         # Standard path (skipna=False): Just apply weights
         result = _matmul(weights_matrix, flat_data)
